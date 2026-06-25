@@ -124,6 +124,8 @@ git push origin v0.1.0
 
 如果需要重跑某个已存在 tag 的发布，可以在 GitHub Actions 页面手动运行 `Release` 工作流并输入 tag，例如 `v0.1.0`。工作流会覆盖同名 Release asset。
 
+工作流也监听 `master` 分支 push，用于让新仓库在 GitHub Actions 页面注册工作流；发布构建 job 只会在 tag push 或手动输入 tag 时运行。
+
 ## 冒烟检查
 
 发布前至少检查：

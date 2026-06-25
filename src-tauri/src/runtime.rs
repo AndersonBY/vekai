@@ -282,20 +282,13 @@ mod tests {
 
     #[test]
     fn runtime_layout_points_to_expected_server() {
-        let layout = runtime_layout(Path::new(r"C:\runtimes"));
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let runtime_root = temp_dir.path().join("runtimes");
+        let layout = runtime_layout(&runtime_root);
 
-        assert_eq!(
-            layout.runtime_dir,
-            PathBuf::from(r"C:\runtimes\llama-bin-win-vulkan-x64")
-        );
-        assert_eq!(
-            layout.server_exe,
-            PathBuf::from(r"C:\runtimes\llama-bin-win-vulkan-x64\llama-server.exe")
-        );
-        assert_eq!(
-            layout.marker_path,
-            PathBuf::from(r"C:\runtimes\llama-bin-win-vulkan-x64\runtime.json")
-        );
+        assert_eq!(layout.runtime_dir, runtime_root.join(RUNTIME_DIR_NAME));
+        assert_eq!(layout.server_exe, layout.runtime_dir.join("llama-server.exe"));
+        assert_eq!(layout.marker_path, layout.runtime_dir.join("runtime.json"));
     }
 
     #[test]

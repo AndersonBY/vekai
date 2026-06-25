@@ -992,7 +992,10 @@ mod tests {
         let model_path = selected_service_model_path(&exe_dir, &config, ServiceKind::Rerank)
             .expect("model should be selected");
 
-        assert_eq!(model_path, selected);
+        assert_eq!(
+            model_path,
+            dunce::canonicalize(&selected).expect("selected model path should canonicalize")
+        );
     }
 
     #[test]

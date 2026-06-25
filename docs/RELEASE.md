@@ -95,6 +95,35 @@ npm run tauri:build
 
 如果只改文档，可以只跑 `git diff --check` 并说明没有重打包。
 
+## GitHub Release 工作流
+
+`.github/workflows/release.yml` 在推送 `vMAJOR.MINOR.PATCH` tag 时触发，例如：
+
+```powershell
+git tag v0.1.0
+git push origin master
+git push origin v0.1.0
+```
+
+工作流会先校验 tag 版本号与以下文件一致：
+
+- `package.json`
+- `src-tauri/Cargo.toml`
+- `src-tauri/tauri.conf.json`
+
+然后分别构建并上传这些平台安装包：
+
+- Windows x64
+- Windows ARM64
+- macOS x64
+- macOS ARM64
+- Ubuntu x64
+- Ubuntu ARM64
+
+工作流只发布安装包产物，不发布 llama.cpp runtime zip 或 GGUF 模型。运行时和模型仍按本文档“运行时”和“模型交付”章节处理。
+
+如果需要重跑某个已存在 tag 的发布，可以在 GitHub Actions 页面手动运行 `Release` 工作流并输入 tag，例如 `v0.1.0`。工作流会覆盖同名 Release asset。
+
 ## 冒烟检查
 
 发布前至少检查：

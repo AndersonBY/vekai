@@ -17,7 +17,7 @@ Local AI Services 是一个 Windows 托盘应用，也提供 Linux GUI/CLI 服�
 
 ## 快速开始
 
-1. 打开 `release\Local AI Services 0.1.2\Local AI Services.exe`，或运行安装包 `release\Local AI Services 0.1.2\Local AI Services_0.1.2_x64-setup.exe`。
+1. 打开 `release\Local AI Services 0.1.3\Local AI Services.exe`，或运行安装包 `release\Local AI Services 0.1.3\Local AI Services_0.1.3_x64-setup.exe`。
 2. 首次使用前运行下载脚本：
 
 ```powershell
@@ -187,12 +187,12 @@ npm run tauri:build
 主要输出：
 
 - `src-tauri\target\release\local-rerank-server.exe`
-- `src-tauri\target\release\bundle\nsis\Local AI Services_0.1.2_x64-setup.exe`
+- `src-tauri\target\release\bundle\nsis\Local AI Services_0.1.3_x64-setup.exe`
 
 仓库也可能同步一份交付目录：
 
-- `release\Local AI Services 0.1.2\Local AI Services.exe`
-- `release\Local AI Services 0.1.2\Local AI Services_0.1.2_x64-setup.exe`
+- `release\Local AI Services 0.1.3\Local AI Services.exe`
+- `release\Local AI Services 0.1.3\Local AI Services_0.1.3_x64-setup.exe`
 
 安装包和 exe 包含前端资源，但不再包含 llama.cpp runtime archive 和 GGUF 模型。运行 `scripts\download-assets.ps1` 会把 runtime 下载到 `%LOCALAPPDATA%\LocalAIService\downloads`，把默认模型下载到 `models\`。交付客户时应同时提供这些下载后的资产，或让客户先运行脚本。
 

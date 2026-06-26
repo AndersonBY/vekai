@@ -149,6 +149,8 @@ jobs:
 
       - name: Download llama.cpp runtime
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: ./scripts/download-assets.ps1 -RuntimePlatform ${{ matrix.runtime-platform }} -SkipModels -DownloadDir downloads
 
       - name: Build Tauri bundles

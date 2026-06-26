@@ -17,7 +17,7 @@ Local AI Services is a Windows tray application that also provides Linux GUI/CLI
 
 ## Quick Start
 
-1. Open `release\Local AI Services 0.1.2\Local AI Services.exe`, or install with `release\Local AI Services 0.1.2\Local AI Services_0.1.2_x64-setup.exe`.
+1. Open `release\Local AI Services 0.1.3\Local AI Services.exe`, or install with `release\Local AI Services 0.1.3\Local AI Services_0.1.3_x64-setup.exe`.
 2. Before first use, run the asset downloader:
 
 ```powershell
@@ -187,12 +187,12 @@ npm run tauri:build
 Main outputs:
 
 - `src-tauri\target\release\local-rerank-server.exe`
-- `src-tauri\target\release\bundle\nsis\Local AI Services_0.1.2_x64-setup.exe`
+- `src-tauri\target\release\bundle\nsis\Local AI Services_0.1.3_x64-setup.exe`
 
 The repository may also contain a copied delivery folder:
 
-- `release\Local AI Services 0.1.2\Local AI Services.exe`
-- `release\Local AI Services 0.1.2\Local AI Services_0.1.2_x64-setup.exe`
+- `release\Local AI Services 0.1.3\Local AI Services.exe`
+- `release\Local AI Services 0.1.3\Local AI Services_0.1.3_x64-setup.exe`
 
 The installer and exe include frontend assets, but no longer include the llama.cpp runtime archive or GGUF models. Run `scripts\download-assets.ps1` to download the runtime into `%LOCALAPPDATA%\LocalAIService\downloads` and default models into `models\`. For customer delivery, ship those downloaded assets beside the app or ask the customer to run the script first.
 

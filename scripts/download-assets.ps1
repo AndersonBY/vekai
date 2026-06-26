@@ -36,6 +36,28 @@ function Write-Step {
     Write-Host "[assets] $Message"
 }
 
+function Get-GitHubApiHeaders {
+    $headers = @{
+        'Accept' = 'application/vnd.github+json'
+        'User-Agent' = 'LocalAIServiceAssetDownloader'
+        'X-GitHub-Api-Version' = '2022-11-28'
+    }
+
+    $token = if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) {
+        $env:GITHUB_TOKEN
+    } elseif (-not [string]::IsNullOrWhiteSpace($env:GH_TOKEN)) {
+        $env:GH_TOKEN
+    } else {
+        ''
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($token)) {
+        $headers['Authorization'] = "Bearer $token"
+    }
+
+    return $headers
+}
+
 function Resolve-RuntimePlatform {
     param([string]$Requested)
 
@@ -148,7 +170,7 @@ function Get-LatestRuntimeAsset {
 
     $apiUrl = "https://api.github.com/repos/$Repo/releases/latest"
     Write-Step "Resolving latest llama.cpp release from $apiUrl"
-    $release = Invoke-RestMethod -Uri $apiUrl -Headers @{ 'User-Agent' = 'LocalAIServiceAssetDownloader' }
+    $release = Invoke-RestMethod -Uri $apiUrl -Headers (Get-GitHubApiHeaders)
     $asset = $release.assets | Where-Object { $_.name -match $Pattern } | Select-Object -First 1
     if (-not $asset) {
         throw "No runtime asset matching $Pattern found in $Repo latest release $($release.tag_name)."

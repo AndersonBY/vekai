@@ -2,21 +2,22 @@
 
 [English](README.md)
 
-Local AI Services 是一个 Windows 托盘应用，用本机下载的 llama.cpp Vulkan 运行时同时提供 Embedding 和 Rerank HTTP 服务。用户启动 exe 后会先看到设置窗口，配置完成后可以最小化到系统托盘，让服务在后台持续运行。
+Local AI Services 是一个 Windows 托盘应用，也提供 Linux GUI/CLI 服务模式，用本机下载的 llama.cpp 运行时同时提供 Embedding 和 Rerank HTTP 服务。Windows 用户启动 exe 后会先看到设置窗口，配置完成后可以最小化到系统托盘，让服务在后台持续运行。
 
 ## 功能
 
 - 同时管理本地 Embedding 服务和 Rerank 服务。
 - 支持任意 `.gguf` 模型文件路径，不要求模型放在固定目录。
-- 提供 `scripts\download-assets.ps1`，自动下载最新 llama.cpp Windows Vulkan x64 运行时和默认 GGUF 模型。
+- 提供 `scripts\download-assets.ps1`，自动下载当前平台匹配的最新 llama.cpp 运行时和默认 GGUF 模型。
 - 支持 llama.cpp 原生接口，以及兼容 SiliconFlow、Cohere、Jina、Voyage 和自定义 JSON HTTP 风格的响应协议。
 - 中文界面默认启用，也可以在设置页切换英文。
 - Windows 托盘常驻，支持打开设置、打开日志目录和退出程序。
 - 关闭设置窗口时会询问最小化到托盘还是退出程序。
+- Linux/macOS/Windows Release 会同时发布对应平台的 llama.cpp runtime 资产；Linux 版本支持 GUI 和 `serve` 服务模式。
 
 ## 快速开始
 
-1. 打开 `release\Local AI Services 0.1.1\Local AI Services.exe`，或运行安装包 `release\Local AI Services 0.1.1\Local AI Services_0.1.1_x64-setup.exe`。
+1. 打开 `release\Local AI Services 0.1.2\Local AI Services.exe`，或运行安装包 `release\Local AI Services 0.1.2\Local AI Services_0.1.2_x64-setup.exe`。
 2. 首次使用前运行下载脚本：
 
 ```powershell
@@ -32,6 +33,12 @@ powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1
 
 - `models\bge-reranker-v2-m3-Q4_K_M.gguf`
 - `models\Qwen3-Embedding-0.6B-Q8_0.gguf`
+
+下载其他平台 runtime 时可以指定：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1 -RuntimePlatform ubuntu-arm64 -SkipModels
+```
 
 ## 默认地址
 
@@ -83,7 +90,25 @@ Embedding 支持：
 | `voyage_embeddings_v1` | `/embeddings` | Voyage Embeddings 风格路径。 |
 | `custom_json_http` | `/embeddings` | 固定本地 JSON 代理格式，不是可视化自定义映射编辑器。 |
 
-非原生协议会启动一个本地协议代理：公开端口保持为你配置的端口，底层 `llama-server.exe` 会运行在自动分配的本机内部端口。
+非原生协议会启动一个本地协议代理：公开端口保持为你配置的端口，底层 `llama-server`/`llama-server.exe` 会运行在自动分配的本机内部端口。
+
+## Linux 服务模式
+
+Linux 安装包同时支持桌面 GUI 和 CLI 服务模式：
+
+```bash
+local-rerank-server serve
+local-rerank-server install-service
+local-rerank-server uninstall-service
+```
+
+`install-service` 会安装用户级 systemd unit 到 `~/.config/systemd/user/local-ai-services.service`，并启动服务。GUI 和服务模式共用当前用户的配置、日志、runtime 和模型路径。需要无人登录后自动启动时，执行：
+
+```bash
+loginctl enable-linger "$USER"
+```
+
+Release 页面会提供与安装包对应的 llama.cpp runtime 资产，例如 `llama-b*-bin-ubuntu-arm64.tar.gz`。把该文件放到用户数据目录的 `downloads/` 或应用同级 `downloads/` 后再启动服务。
 
 ## 请求示例
 
@@ -162,14 +187,14 @@ npm run tauri:build
 主要输出：
 
 - `src-tauri\target\release\local-rerank-server.exe`
-- `src-tauri\target\release\bundle\nsis\Local AI Services_0.1.1_x64-setup.exe`
+- `src-tauri\target\release\bundle\nsis\Local AI Services_0.1.2_x64-setup.exe`
 
 仓库也可能同步一份交付目录：
 
-- `release\Local AI Services 0.1.1\Local AI Services.exe`
-- `release\Local AI Services 0.1.1\Local AI Services_0.1.1_x64-setup.exe`
+- `release\Local AI Services 0.1.2\Local AI Services.exe`
+- `release\Local AI Services 0.1.2\Local AI Services_0.1.2_x64-setup.exe`
 
-安装包和 exe 包含前端资源，但不再包含 llama.cpp zip 和 GGUF 模型。运行 `scripts\download-assets.ps1` 会把 runtime 下载到 `%LOCALAPPDATA%\LocalAIService\downloads`，把默认模型下载到 `models\`。交付客户时应同时提供这些下载后的资产，或让客户先运行脚本。
+安装包和 exe 包含前端资源，但不再包含 llama.cpp runtime archive 和 GGUF 模型。运行 `scripts\download-assets.ps1` 会把 runtime 下载到 `%LOCALAPPDATA%\LocalAIService\downloads`，把默认模型下载到 `models\`。交付客户时应同时提供这些下载后的资产，或让客户先运行脚本。
 
 ## 常见问题
 
@@ -183,7 +208,7 @@ npm run tauri:build
 
 **首次启动服务较慢**
 
-首次启动服务会把 `%LOCALAPPDATA%\LocalAIService\downloads\llama-b*-bin-win-vulkan-x64.zip` 解压到 `%LOCALAPPDATA%\LocalAIService\runtimes`，后续启动会复用已解压的运行时。如果缺少 zip，先运行 `scripts\download-assets.ps1`。
+首次启动服务会把 `%LOCALAPPDATA%\LocalAIService\downloads\llama-b*-bin-<platform>.*` 解压到 `%LOCALAPPDATA%\LocalAIService\runtimes`，后续启动会复用已解压的运行时。如果缺少 runtime archive，先运行 `scripts\download-assets.ps1`。
 
 **Windows Defender 或防火墙提示**
 

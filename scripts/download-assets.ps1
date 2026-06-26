@@ -3,6 +3,8 @@ param(
     [string]$AssetsFile = '',
     [string]$DownloadDir = '',
     [string]$ModelsDir = '',
+    [ValidateSet('auto', 'windows-x64', 'windows-arm64', 'ubuntu-x64', 'ubuntu-arm64', 'macos-x64', 'macos-arm64')]
+    [string]$RuntimePlatform = 'auto',
     [switch]$SkipRuntime,
     [switch]$SkipModels,
     [switch]$Force,
@@ -32,6 +34,32 @@ if ([string]::IsNullOrWhiteSpace($ModelsDir)) {
 function Write-Step {
     param([string]$Message)
     Write-Host "[assets] $Message"
+}
+
+function Resolve-RuntimePlatform {
+    param([string]$Requested)
+
+    if ($Requested -ne 'auto') {
+        return $Requested
+    }
+
+    $os = if ($IsLinux) {
+        'ubuntu'
+    } elseif ($IsMacOS) {
+        'macos'
+    } else {
+        'windows'
+    }
+
+    $arch = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()) {
+        'X64' { 'x64' }
+        'Arm64' { 'arm64' }
+        default {
+            throw "Unsupported CPU architecture for llama.cpp runtime: $([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)"
+        }
+    }
+
+    return "$os-$arch"
 }
 
 function Get-Sha256 {
@@ -143,8 +171,15 @@ New-Item -ItemType Directory -Force -Path $DownloadDir | Out-Null
 New-Item -ItemType Directory -Force -Path $ModelsDir | Out-Null
 
 if (-not $SkipRuntime) {
-    $runtime = Get-LatestRuntimeAsset -Repo $assets.runtime.githubRepo -Pattern $assets.runtime.assetPattern
+    $resolvedRuntimePlatform = Resolve-RuntimePlatform -Requested $RuntimePlatform
+    $runtimePlatformConfig = $assets.runtime.platforms.$resolvedRuntimePlatform
+    if (-not $runtimePlatformConfig) {
+        throw "No runtime asset configuration for platform '$resolvedRuntimePlatform'."
+    }
+
+    $runtime = Get-LatestRuntimeAsset -Repo $assets.runtime.githubRepo -Pattern ([string]$runtimePlatformConfig.assetPattern)
     $runtimePath = Join-Path $DownloadDir $runtime.Name
+    Write-Step "Runtime platform: $resolvedRuntimePlatform"
     Write-Step "Runtime: $($runtime.Name) from $($runtime.Tag)"
 
     if (-not $Force -and (Test-Asset -Path $runtimePath -ExpectedSize $runtime.Size -ExpectedSha256 $null)) {

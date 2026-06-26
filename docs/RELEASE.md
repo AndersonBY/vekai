@@ -1,6 +1,6 @@
 # 发布与交付
 
-本文档记录 Local AI Services 的 Windows 打包和交付事实。用户使用说明见 [../README_ZH.md](../README_ZH.md) 和 [../README.md](../README.md)。
+本文档记录 Local AI Services 的 Windows、macOS 和 Linux 打包交付事实。用户使用说明见 [../README_ZH.md](../README_ZH.md) 和 [../README.md](../README.md)。
 
 ## 打包命令
 
@@ -24,14 +24,14 @@ Tauri 默认产物：
 
 ```text
 src-tauri\target\release\local-rerank-server.exe
-src-tauri\target\release\bundle\nsis\Local AI Services_0.1.1_x64-setup.exe
+src-tauri\target\release\bundle\nsis\Local AI Services_0.1.2_x64-setup.exe
 ```
 
 仓库交付目录可能包含同步副本：
 
 ```text
-release\Local AI Services 0.1.1\Local AI Services.exe
-release\Local AI Services 0.1.1\Local AI Services_0.1.1_x64-setup.exe
+release\Local AI Services 0.1.2\Local AI Services.exe
+release\Local AI Services 0.1.2\Local AI Services_0.1.2_x64-setup.exe
 ```
 
 如果版本号或产品名变化，要同步：
@@ -43,7 +43,7 @@ release\Local AI Services 0.1.1\Local AI Services_0.1.1_x64-setup.exe
 
 ## 运行时
 
-llama.cpp Windows Vulkan x64 zip 不进 Git，也不再通过 `include_bytes!` 编进 exe。`scripts\download-assets.ps1` 会从 `ggml-org/llama.cpp` 最新 GitHub Release 自动选择 `llama-b*-bin-win-vulkan-x64.zip` 并默认下载到：
+llama.cpp runtime 不进 Git，也不再通过 `include_bytes!` 编进 exe。`scripts\download-assets.ps1` 会从 `ggml-org/llama.cpp` 最新 GitHub Release 自动选择当前平台的 runtime，并默认下载到：
 
 ```text
 %LOCALAPPDATA%\LocalAIService\downloads
@@ -57,13 +57,24 @@ llama.cpp Windows Vulkan x64 zip 不进 Git，也不再通过 `include_bytes!` �
 <repo>\downloads
 ```
 
-找到 zip 后解压到：
+找到 runtime archive 后解压到：
 
 ```text
 %LOCALAPPDATA%\LocalAIService\runtimes
 ```
 
-运行时 marker 使用 zip 文件名和 SHA256 判断是否需要重新解压。更新 zip 不要求改代码，但交付目录必须包含 exe 同级 `downloads\llama-b*-bin-win-vulkan-x64.zip`，或者客户先运行下载脚本把 runtime 放进本机数据目录。
+运行时 marker 使用 archive 文件名和 SHA256 判断是否需要重新解压。更新 runtime 不要求改代码，但交付目录必须包含应用同级 `downloads\llama-b*-bin-<platform>.*`，或者客户先运行下载脚本把 runtime 放进本机数据目录。
+
+支持的 runtime 平台：
+
+| 平台 | 下载脚本参数 | llama.cpp asset |
+| --- | --- | --- |
+| Windows x64 | `windows-x64` | `llama-b*-bin-win-vulkan-x64.zip` |
+| Windows ARM64 | `windows-arm64` | `llama-b*-bin-win-cpu-arm64.zip` |
+| Ubuntu/Linux x64 | `ubuntu-x64` | `llama-b*-bin-ubuntu-x64.tar.gz` |
+| Ubuntu/Linux ARM64 | `ubuntu-arm64` | `llama-b*-bin-ubuntu-arm64.tar.gz` |
+| macOS x64 | `macos-x64` | `llama-b*-bin-macos-x64.tar.gz` |
+| macOS ARM64 | `macos-arm64` | `llama-b*-bin-macos-arm64.tar.gz` |
 
 ## 模型交付
 
@@ -100,9 +111,9 @@ npm run tauri:build
 `.github/workflows/release.yml` 在推送 `vMAJOR.MINOR.PATCH` tag 时触发，例如：
 
 ```powershell
-git tag v0.1.1
+git tag v0.1.2
 git push origin master
-git push origin v0.1.1
+git push origin v0.1.2
 ```
 
 工作流会先校验 tag 版本号与以下文件一致：
@@ -120,11 +131,20 @@ git push origin v0.1.1
 - Ubuntu x64
 - Ubuntu ARM64
 
-工作流只发布安装包产物，不发布 llama.cpp runtime zip 或 GGUF 模型。运行时和模型仍按本文档“运行时”和“模型交付”章节处理。
+工作流会发布安装包产物和对应平台的 llama.cpp runtime archive，不发布 GGUF 模型。模型仍按本文档“模型交付”章节处理。
 
-如果需要重跑某个已存在 tag 的发布，可以在 GitHub Actions 页面手动运行 `Release` 工作流并输入 tag，例如 `v0.1.1`。工作流会覆盖同名 Release asset。
+如果需要重跑某个已存在 tag 的发布，可以在 GitHub Actions 页面手动运行 `Release` 工作流并输入 tag，例如 `v0.1.2`。工作流会覆盖同名 Release asset。
 
 工作流也监听 `master` 分支 push，用于让新仓库在 GitHub Actions 页面注册工作流；发布构建 job 只会在 tag push 或手动输入 tag 时运行。
+
+Linux `.deb` 包会额外包含服务模式说明文件：
+
+```text
+/usr/share/doc/local-rerank-server/README-service.md
+/usr/share/doc/local-rerank-server/examples/local-ai-services.service
+```
+
+应用资源目录也会包含同一份 `linux-service/` 文件，方便 GUI 包内查看或复制。
 
 ## 冒烟检查
 
@@ -135,6 +155,8 @@ git push origin v0.1.1
 - 设置窗口可切换中文/英文。
 - 可以为两个服务选择 `.gguf` 模型。
 - `downloads\` 中存在 `llama-b*-bin-win-vulkan-x64.zip`。
+- Linux 上 `local-rerank-server serve` 可以以前台服务模式启动。
+- Linux 上 `local-rerank-server install-service` 会安装用户级 systemd unit。
 - 启动服务后“启动服务”按钮不可点。
 - 设置页可配置线程数、并发槽位和 HTTP 线程数，`0` 表示由 llama.cpp 自动决定。
 - 关闭设置窗口会询问最小化到托盘或退出。
@@ -151,7 +173,7 @@ git push origin v0.1.1
 
 **安装包是否包含 llama.cpp 运行时？**
 
-不再包含。runtime zip 是下载资产，脚本默认放在 `%LOCALAPPDATA%\LocalAIService\downloads`。交付客户时可以同时提供 exe 同级 `downloads\`，或者让客户先运行 `scripts\download-assets.ps1`。
+不再包含。runtime archive 是下载资产，脚本默认放在 `%LOCALAPPDATA%\LocalAIService\downloads` 或对应系统的本地数据目录。交付客户时可以同时提供应用同级 `downloads\`，或者让客户先运行 `scripts\download-assets.ps1`。
 
 **安装包是否必须包含模型？**
 

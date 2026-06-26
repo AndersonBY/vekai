@@ -22,6 +22,7 @@ const CLOSE_CONFIRM_SCRIPT: &str = r#"
 })();
 "#;
 
+pub mod cli;
 pub mod commands;
 pub mod config;
 pub mod llama_args;
@@ -33,6 +34,144 @@ pub mod protocol_proxy;
 pub mod runtime;
 pub mod service;
 pub mod state;
+
+pub async fn run_service_foreground() -> anyhow::Result<()> {
+    let paths = build_app_paths()?;
+    ensure_log_dir(&paths.logs)?;
+    let initial = load_initial_config(&paths)?;
+    if let Some(warning) = initial.warning.as_deref() {
+        append_log(&paths.logs.app_log, warning)?;
+    }
+    cleanup_old_logs(&paths.logs.log_dir, initial.config.log_retention_days)?;
+
+    let state: SharedAppState = Arc::new(Mutex::new(AppStateInner::new(initial.config)));
+    let managers = Arc::new(ServiceManagers::new());
+    commands::start_servers_inner(&state, &managers, &paths).await?;
+    append_log(&paths.logs.app_log, "Local AI Services CLI service started")?;
+
+    match wait_for_shutdown_signal().await {
+        Ok(()) => {
+            append_log(
+                &paths.logs.app_log,
+                "Local AI Services CLI service stopping",
+            )?;
+        }
+        Err(error) => {
+            append_log(
+                &paths.logs.app_log,
+                &format!("Failed to listen for shutdown signal: {error}"),
+            )?;
+        }
+    }
+
+    for manager in managers.all() {
+        manager.request_shutdown();
+        manager.stop(state.clone(), paths.logs.clone()).await?;
+    }
+    append_log(&paths.logs.app_log, "Local AI Services CLI service stopped")?;
+    Ok(())
+}
+
+async fn wait_for_shutdown_signal() -> anyhow::Result<()> {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+
+        let mut terminate = signal(SignalKind::terminate())?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result?,
+            _ = terminate.recv() => {},
+        }
+        return Ok(());
+    }
+
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c().await?;
+        Ok(())
+    }
+}
+
+pub fn print_cli_help() {
+    println!(
+        "Local AI Services\n\nUsage:\n  local-rerank-server                 Start GUI tray app\n  local-rerank-server serve           Run enabled services in foreground\n  local-rerank-server install-service Install user systemd service on Linux\n  local-rerank-server uninstall-service Remove user systemd service on Linux"
+    );
+}
+
+#[cfg(target_os = "linux")]
+pub fn install_user_service() -> anyhow::Result<()> {
+    use anyhow::Context;
+    use std::fs;
+
+    let exe = std::env::current_exe().context("failed to resolve current executable")?;
+    let service_dir = dirs::home_dir()
+        .context("failed to resolve home directory")?
+        .join(".config")
+        .join("systemd")
+        .join("user");
+    fs::create_dir_all(&service_dir)
+        .with_context(|| format!("failed to create {}", service_dir.display()))?;
+    let service_path = service_dir.join("local-ai-services.service");
+    fs::write(&service_path, cli::linux_systemd_unit(&exe))
+        .with_context(|| format!("failed to write {}", service_path.display()))?;
+
+    run_systemctl_user(["daemon-reload"])?;
+    run_systemctl_user(["enable", "--now", "local-ai-services.service"])?;
+    println!(
+        "Installed and started user service: {}",
+        service_path.display()
+    );
+    println!("For boot without login, run: loginctl enable-linger $USER");
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn install_user_service() -> anyhow::Result<()> {
+    anyhow::bail!("systemd service installation is only supported on Linux")
+}
+
+#[cfg(target_os = "linux")]
+pub fn uninstall_user_service() -> anyhow::Result<()> {
+    use anyhow::Context;
+    use std::fs;
+
+    let service_path = dirs::home_dir()
+        .context("failed to resolve home directory")?
+        .join(".config")
+        .join("systemd")
+        .join("user")
+        .join("local-ai-services.service");
+    let _ = run_systemctl_user(["disable", "--now", "local-ai-services.service"]);
+    if service_path.exists() {
+        fs::remove_file(&service_path)
+            .with_context(|| format!("failed to remove {}", service_path.display()))?;
+    }
+    run_systemctl_user(["daemon-reload"])?;
+    println!("Removed user service: {}", service_path.display());
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn uninstall_user_service() -> anyhow::Result<()> {
+    anyhow::bail!("systemd service removal is only supported on Linux")
+}
+
+#[cfg(target_os = "linux")]
+fn run_systemctl_user<const N: usize>(args: [&str; N]) -> anyhow::Result<()> {
+    use anyhow::{anyhow, Context};
+    use std::process::Command;
+
+    let status = Command::new("systemctl")
+        .arg("--user")
+        .args(args)
+        .status()
+        .context("failed to run systemctl --user")?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(anyhow!("systemctl --user exited with {status}"))
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -294,6 +433,18 @@ mod tests {
         assert!(should_intercept_window_close(SETTINGS_WINDOW_LABEL));
         assert!(!should_intercept_window_close("logs"));
         assert!(!should_intercept_window_close(""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_service_shutdown_listener_includes_sigterm() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"),
+        )
+        .expect("lib.rs should be readable");
+
+        assert!(source.contains("SignalKind::terminate"));
+        assert!(source.contains("tokio::select!"));
     }
 }
 

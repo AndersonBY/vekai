@@ -1,6 +1,6 @@
 # 架构说明
 
-Local AI Services 是一个 Windows 桌面托盘应用。它的核心职责是管理本机 `llama-server.exe` 进程，并对外提供 Embedding 和 Rerank HTTP 服务。
+Local AI Services 是一个桌面 GUI 与 CLI 服务双模式应用。它的核心职责是管理本机 `llama-server`/`llama-server.exe` 进程，并对外提供 Embedding 和 Rerank HTTP 服务。
 
 ## 系统边界
 
@@ -11,16 +11,16 @@ React Settings UI
         v
 Rust app state and config
         |
-        +--> runtime zip lookup and extraction
+        +--> runtime archive lookup and extraction
         +--> model path validation
         +--> process supervision
         +--> protocol proxy
                  |
                  v
-          llama-server.exe
+          llama-server
 ```
 
-前端只负责配置、状态展示、测试按钮和用户交互。服务启动、进程管理、配置持久化、日志、运行时 zip 查找/解压和协议转换都由 Rust 侧负责。
+前端只负责配置、状态展示、测试按钮和用户交互。服务启动、进程管理、配置持久化、日志、运行时 archive 查找/解压和协议转换都由 Rust 侧负责。
 
 ## 主要模块
 
@@ -33,11 +33,12 @@ Rust app state and config
 | `src-tauri/src/config.rs` | 配置结构、默认值、协议白名单和配置校验。 |
 | `src-tauri/src/commands.rs` | Tauri 命令实现、路径解析、启动/停止/保存/测试入口。 |
 | `src-tauri/src/service.rs` | 服务枚举、默认端口、服务标识。 |
-| `src-tauri/src/llama_args.rs` | 根据配置和模型路径生成 `llama-server.exe` 参数。 |
+| `src-tauri/src/llama_args.rs` | 根据配置和模型路径生成 `llama-server` 参数。 |
+| `src-tauri/src/cli.rs` | 解析 CLI 子命令并生成 Linux systemd unit 内容。 |
 | `src-tauri/src/process.rs` | 子进程启动、健康检查、停止、崩溃重启和日志汇总。 |
-| `src-tauri/src/runtime.rs` | 已下载 llama.cpp zip 的查找、哈希、解压和运行时布局。 |
+| `src-tauri/src/runtime.rs` | 已下载 llama.cpp runtime archive 的查找、哈希、解压和运行时布局。 |
 | `scripts/assets.json` | 默认 runtime/model 下载配置、模型大小和 SHA256。 |
-| `scripts/download-assets.ps1` | Windows 资产下载脚本，下载 latest llama.cpp Vulkan runtime 和默认 GGUF 模型。 |
+| `scripts/download-assets.ps1` | 资产下载脚本，下载当前平台匹配的 latest llama.cpp runtime 和默认 GGUF 模型。 |
 | `src-tauri/src/models.rs` | `.gguf` 模型发现、默认模型选择和展示数据。 |
 | `src-tauri/src/protocol_adapter.rs` | 各协议到 llama.cpp 原生 JSON 的请求/响应转换。 |
 | `src-tauri/src/protocol_proxy.rs` | 非原生协议的本地 HTTP 代理。 |
@@ -83,20 +84,32 @@ Rust app state and config
 
 `threads` 映射到 `llama-server --threads`，`parallel_slots` 映射到 `--parallel`，`http_threads` 映射到 `--threads-http`。这三个数字字段都使用 `0` 表示不传对应参数，由 llama.cpp 自动决定。
 
+## 运行模式
+
+无子命令启动时进入 Tauri GUI。CLI 子命令包括：
+
+```text
+local-rerank-server serve
+local-rerank-server install-service
+local-rerank-server uninstall-service
+```
+
+`serve` 前台启动所有已启用服务并等待退出信号。Linux 上的 `install-service` 写入用户级 systemd unit 到 `~/.config/systemd/user/local-ai-services.service` 并执行 `systemctl --user enable --now local-ai-services.service`。
+
 ## 服务启动模型
 
 每个服务都有自己的启用状态、端口、模型路径和协议。启动时会：
 
 1. 读取当前配置。
 2. 确认服务已启用且模型路径存在。
-3. 确保已下载的 llama.cpp 运行时 zip 已解压。
+3. 确保已下载的 llama.cpp 运行时 archive 已解压。
 4. 根据协议决定是否需要本地代理。
-5. 按配置生成 `llama-server.exe` 参数并启动进程。
+5. 按配置生成 `llama-server` 参数并启动进程。
 6. 轮询 `/health`。
 7. 更新状态和最近日志。
 
 Rerank 和 Embedding 同时启用时不能使用同一个端口。
-Rerank 与 Embedding 分别由独立的 `llama-server.exe` 进程承载；同一个服务内的推理并发由 llama.cpp `--parallel` slot 决定，非原生协议代理只负责并发转发和协议转换。
+Rerank 与 Embedding 分别由独立的 `llama-server` 进程承载；同一个服务内的推理并发由 llama.cpp `--parallel` slot 决定，非原生协议代理只负责并发转发和协议转换。
 
 ## 协议模型
 
@@ -107,7 +120,7 @@ Rerank 与 Embedding 分别由独立的 `llama-server.exe` 进程承载；同一
 | Rerank | `llama_rerank` | `8012` | `/v1/rerank` |
 | Embedding | `openai_embeddings` | `8013` | `/v1/embeddings` |
 
-非原生协议使用本地协议代理。代理监听用户配置的公开端口，底层 `llama-server.exe` 运行在自动分配的内部 loopback 端口。
+非原生协议使用本地协议代理。代理监听用户配置的公开端口，底层 `llama-server` 运行在自动分配的内部 loopback 端口。
 
 Rerank 协议：
 

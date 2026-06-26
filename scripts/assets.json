@@ -1,7 +1,26 @@
 {
   "runtime": {
     "githubRepo": "ggml-org/llama.cpp",
-    "assetPattern": "^llama-b[0-9]+-bin-win-vulkan-x64\\.zip$"
+    "platforms": {
+      "windows-x64": {
+        "assetPattern": "^llama-b[0-9]+-bin-win-vulkan-x64\\.zip$"
+      },
+      "windows-arm64": {
+        "assetPattern": "^llama-b[0-9]+-bin-win-cpu-arm64\\.zip$"
+      },
+      "ubuntu-x64": {
+        "assetPattern": "^llama-b[0-9]+-bin-ubuntu-x64\\.tar\\.gz$"
+      },
+      "ubuntu-arm64": {
+        "assetPattern": "^llama-b[0-9]+-bin-ubuntu-arm64\\.tar\\.gz$"
+      },
+      "macos-x64": {
+        "assetPattern": "^llama-b[0-9]+-bin-macos-x64\\.tar\\.gz$"
+      },
+      "macos-arm64": {
+        "assetPattern": "^llama-b[0-9]+-bin-macos-arm64\\.tar\\.gz$"
+      }
+    }
   },
   "models": [
     {

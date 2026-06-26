@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Local AI Services",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "identifier": "com.local-rerank.server",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -28,6 +28,23 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "resources": {
+      "resources/linux/": "linux-service/"
+    },
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/share/doc/local-rerank-server/examples/local-ai-services.service": "resources/linux/local-ai-services.service",
+          "/usr/share/doc/local-rerank-server/README-service.md": "resources/linux/README-service.md"
+        }
+      },
+      "appimage": {
+        "files": {
+          "usr/share/doc/local-rerank-server/examples/local-ai-services.service": "resources/linux/local-ai-services.service",
+          "usr/share/doc/local-rerank-server/README-service.md": "resources/linux/README-service.md"
+        }
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

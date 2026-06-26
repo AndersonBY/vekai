@@ -3,7 +3,10 @@ param(
     [string]$OutputDir,
 
     [Parameter(Mandatory = $true)]
-    [string]$TargetName
+    [string]$TargetName,
+
+    [ValidateSet('', 'windows-x64', 'windows-arm64', 'ubuntu-x64', 'ubuntu-arm64', 'macos-x64', 'macos-arm64')]
+    [string]$RuntimePlatform = ''
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,12 +15,15 @@ $root = Split-Path -Parent $PSScriptRoot
 $outputPath = Join-Path $root $OutputDir
 New-Item -ItemType Directory -Force -Path $outputPath | Out-Null
 
+$packageJson = Get-Content -Raw -LiteralPath (Join-Path $root "package.json") | ConvertFrom-Json
+$version = [string]$packageJson.version
+
 $bundleRoot = [IO.Path]::Combine($root, "src-tauri", "target")
 if (-not (Test-Path -LiteralPath $bundleRoot)) {
     throw "Tauri target directory not found: $bundleRoot"
 }
 
-$patterns = @(
+$bundlePatterns = @(
     "release/bundle/nsis/*.exe",
     "release/bundle/msi/*.msi",
     "release/bundle/dmg/*.dmg",
@@ -34,10 +40,39 @@ $patterns = @(
     "*/release/bundle/rpm/*.rpm"
 )
 
-$artifacts = foreach ($pattern in $patterns) {
+$bundleArtifacts = foreach ($pattern in $bundlePatterns) {
     Get-ChildItem -Path (Join-Path $bundleRoot $pattern) -File -ErrorAction SilentlyContinue
 }
 
+$bundleArtifacts = $bundleArtifacts | Where-Object {
+    $_.Name -like "*$version*"
+}
+if (-not $bundleArtifacts) {
+    throw "No Tauri bundle artifacts for version $version found under $bundleRoot"
+}
+
+$downloadRoot = Join-Path $root "downloads"
+$runtimeArtifacts = @()
+foreach ($pattern in @("*.zip", "*.tar.gz")) {
+    $runtimeArtifacts += Get-ChildItem -Path (Join-Path $downloadRoot $pattern) -File -ErrorAction SilentlyContinue
+}
+if ($RuntimePlatform) {
+    $runtimePattern = switch ($RuntimePlatform) {
+        'windows-x64' { '*-bin-win-vulkan-x64.zip' }
+        'windows-arm64' { '*-bin-win-cpu-arm64.zip' }
+        'ubuntu-x64' { '*-bin-ubuntu-x64.tar.gz' }
+        'ubuntu-arm64' { '*-bin-ubuntu-arm64.tar.gz' }
+        'macos-x64' { '*-bin-macos-x64.tar.gz' }
+        'macos-arm64' { '*-bin-macos-arm64.tar.gz' }
+    }
+    $runtimeArtifacts = $runtimeArtifacts | Where-Object { $_.Name -like $runtimePattern }
+}
+if (-not $runtimeArtifacts) {
+    $suffix = if ($RuntimePlatform) { " for $RuntimePlatform" } else { "" }
+    throw "No runtime archives$suffix found under $downloadRoot"
+}
+
+$artifacts = @($bundleArtifacts) + @($runtimeArtifacts)
 $artifacts = $artifacts | Sort-Object FullName -Unique
 if (-not $artifacts) {
     throw "No Tauri bundle artifacts found under $bundleRoot"
@@ -46,10 +81,12 @@ if (-not $artifacts) {
 foreach ($artifact in $artifacts) {
     $extension = if ($artifact.Name.EndsWith(".app.tar.gz", [StringComparison]::OrdinalIgnoreCase)) {
         ".app.tar.gz"
+    } elseif ($artifact.Name.EndsWith(".tar.gz", [StringComparison]::OrdinalIgnoreCase)) {
+        ".tar.gz"
     } else {
         $artifact.Extension
     }
-    $baseName = if ($extension -eq ".app.tar.gz") {
+    $baseName = if ($extension -eq ".app.tar.gz" -or $extension -eq ".tar.gz") {
         $artifact.Name.Substring(0, $artifact.Name.Length - $extension.Length)
     } else {
         [IO.Path]::GetFileNameWithoutExtension($artifact.Name)

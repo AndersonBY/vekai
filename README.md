@@ -2,21 +2,22 @@
 
 [中文说明](README_ZH.md)
 
-Local AI Services is a Windows tray application that runs local Embedding and Rerank HTTP services with a locally downloaded llama.cpp Vulkan runtime. Users can start the exe, configure GGUF model paths in the settings window, and keep the services running in the background from the system tray.
+Local AI Services is a Windows tray application that also provides Linux GUI/CLI service mode. It runs local Embedding and Rerank HTTP services with a locally downloaded llama.cpp runtime. Windows users can start the exe, configure GGUF model paths in the settings window, and keep the services running in the background from the system tray.
 
 ## Features
 
 - Runs local Embedding and Rerank services at the same time.
 - Lets users choose any `.gguf` model file path instead of requiring a fixed model directory.
-- Provides `scripts\download-assets.ps1` to download the latest llama.cpp Windows Vulkan x64 runtime and default GGUF models.
+- Provides `scripts\download-assets.ps1` to download the latest matching llama.cpp runtime for the current platform and default GGUF models.
 - Supports native llama.cpp endpoints plus SiliconFlow, Cohere, Jina, Voyage, and custom JSON HTTP compatible response shapes.
 - Starts with a Chinese UI by default and includes an English language switch.
 - Stays in the Windows system tray with actions for settings, logs, and quit.
 - Prompts on settings-window close to either minimize to tray or quit the application.
+- Release assets include matching llama.cpp runtime archives for Windows, macOS, and Linux; Linux builds support both GUI and `serve` service mode.
 
 ## Quick Start
 
-1. Open `release\Local AI Services 0.1.1\Local AI Services.exe`, or install with `release\Local AI Services 0.1.1\Local AI Services_0.1.1_x64-setup.exe`.
+1. Open `release\Local AI Services 0.1.2\Local AI Services.exe`, or install with `release\Local AI Services 0.1.2\Local AI Services_0.1.2_x64-setup.exe`.
 2. Before first use, run the asset downloader:
 
 ```powershell
@@ -32,6 +33,12 @@ The asset downloader provides two default test models:
 
 - `models\bge-reranker-v2-m3-Q4_K_M.gguf`
 - `models\Qwen3-Embedding-0.6B-Q8_0.gguf`
+
+To download a runtime for another platform:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1 -RuntimePlatform ubuntu-arm64 -SkipModels
+```
 
 ## Default URLs
 
@@ -55,7 +62,7 @@ When the host is set to `0.0.0.0`, services listen on all network interfaces. Us
 | Parallel slots | Maps to llama.cpp `--parallel` and controls same-service inference slots; `0` means automatic. |
 | HTTP threads | Maps to llama.cpp `--threads-http`; `0` means automatic. |
 | Auto-start enabled services | Starts enabled services when the app starts. |
-| Restart on crash | Restarts `llama-server.exe` after an unexpected exit. |
+| Restart on crash | Restarts `llama-server`/`llama-server.exe` after an unexpected exit. |
 | Log retention days | Defaults to 7 days. |
 
 If a service-impacting setting changes while a service is running, the Save button becomes Save & Restart.
@@ -83,7 +90,25 @@ Embedding protocols:
 | `voyage_embeddings_v1` | `/embeddings` | Voyage Embeddings style path. |
 | `custom_json_http` | `/embeddings` | Fixed local JSON proxy format, not a user-editable mapping editor. |
 
-Non-native protocols run through an app-managed local protocol proxy. The public port remains the configured port, while the underlying `llama-server.exe` process runs on an automatically allocated internal loopback port.
+Non-native protocols run through an app-managed local protocol proxy. The public port remains the configured port, while the underlying `llama-server`/`llama-server.exe` process runs on an automatically allocated internal loopback port.
+
+## Linux Service Mode
+
+Linux packages support both desktop GUI startup and CLI service mode:
+
+```bash
+local-rerank-server serve
+local-rerank-server install-service
+local-rerank-server uninstall-service
+```
+
+`install-service` installs and starts a user-level systemd unit at `~/.config/systemd/user/local-ai-services.service`. GUI and service mode share the current user's config, logs, runtime, and model paths. For startup before user login, run:
+
+```bash
+loginctl enable-linger "$USER"
+```
+
+The Release page includes matching llama.cpp runtime archives, for example `llama-b*-bin-ubuntu-arm64.tar.gz`. Place the matching archive in the user data `downloads/` directory or an app-adjacent `downloads/` directory before starting services.
 
 ## Request Examples
 
@@ -162,14 +187,14 @@ npm run tauri:build
 Main outputs:
 
 - `src-tauri\target\release\local-rerank-server.exe`
-- `src-tauri\target\release\bundle\nsis\Local AI Services_0.1.1_x64-setup.exe`
+- `src-tauri\target\release\bundle\nsis\Local AI Services_0.1.2_x64-setup.exe`
 
 The repository may also contain a copied delivery folder:
 
-- `release\Local AI Services 0.1.1\Local AI Services.exe`
-- `release\Local AI Services 0.1.1\Local AI Services_0.1.1_x64-setup.exe`
+- `release\Local AI Services 0.1.2\Local AI Services.exe`
+- `release\Local AI Services 0.1.2\Local AI Services_0.1.2_x64-setup.exe`
 
-The installer and exe include frontend assets, but no longer include the llama.cpp zip or GGUF models. Run `scripts\download-assets.ps1` to download the runtime into `%LOCALAPPDATA%\LocalAIService\downloads` and default models into `models\`. For customer delivery, ship those downloaded assets beside the app or ask the customer to run the script first.
+The installer and exe include frontend assets, but no longer include the llama.cpp runtime archive or GGUF models. Run `scripts\download-assets.ps1` to download the runtime into `%LOCALAPPDATA%\LocalAIService\downloads` and default models into `models\`. For customer delivery, ship those downloaded assets beside the app or ask the customer to run the script first.
 
 ## Troubleshooting
 
@@ -183,7 +208,7 @@ Click Browse in the corresponding service panel and choose the correct `.gguf` m
 
 **The first service startup is slow**
 
-The first service startup extracts `%LOCALAPPDATA%\LocalAIService\downloads\llama-b*-bin-win-vulkan-x64.zip` into `%LOCALAPPDATA%\LocalAIService\runtimes`. Later starts reuse the extracted runtime. If the zip is missing, run `scripts\download-assets.ps1` first.
+The first service startup extracts `%LOCALAPPDATA%\LocalAIService\downloads\llama-b*-bin-<platform>.*` into `%LOCALAPPDATA%\LocalAIService\runtimes`. Later starts reuse the extracted runtime. If the runtime archive is missing, run `scripts\download-assets.ps1` first.
 
 **Windows Defender or firewall prompts**
 

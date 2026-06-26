@@ -51,7 +51,7 @@ npm run tauri:build
 | 端口 | Rerank 默认 `8012`，Embedding 默认 `8013`。 |
 | UI 语言 | 默认中文，允许切换英文。 |
 | 模型路径 | 用户通过文件选择器选择完整 `.gguf` 路径，不写死模型路径。 |
-| 大资产 | llama.cpp zip 和 `.gguf` 模型不进 Git，通过 `scripts/download-assets.ps1` 下载。 |
+| 大资产 | llama.cpp runtime archive 和 `.gguf` 模型不进 Git，通过 `scripts/download-assets.ps1` 下载。 |
 | 托盘体验 | 关闭设置窗口应询问最小化到托盘还是退出。 |
 | 原生协议 | Rerank `/v1/rerank`，Embedding `/v1/embeddings`。 |
 | 非原生协议 | 通过本地代理转换，不直接暴露内部 llama.cpp 端口。 |
@@ -62,7 +62,7 @@ npm run tauri:build
 - 前端显示状态与 Rust 快照字段不一致。
 - 服务运行中仍允许点击“启动服务”。
 - 保存服务相关配置后没有重启运行中的服务。
-- 打包后缺前端资源或运行时 zip。
+- 打包后缺前端资源或运行时 archive。
 - 把 `downloads\` 或 `models\*.gguf` 误提交进 Git。
 - 日志写到旧目录。
 - 协议下拉有选项，但 Rust 配置白名单不接受。

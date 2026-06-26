@@ -62,6 +62,8 @@ pub struct AppConfig {
     pub restart_on_crash: bool,
     pub gpu_layers: String,
     pub threads: u16,
+    pub parallel_slots: u16,
+    pub http_threads: u16,
     pub log_retention_days: u16,
 }
 
@@ -75,6 +77,8 @@ impl Default for AppConfig {
             restart_on_crash: true,
             gpu_layers: "auto".to_string(),
             threads: 0,
+            parallel_slots: 0,
+            http_threads: 0,
             log_retention_days: 7,
         }
     }
@@ -276,6 +280,8 @@ mod tests {
         assert!(config.restart_on_crash);
         assert_eq!(config.gpu_layers, "auto");
         assert_eq!(config.threads, 0);
+        assert_eq!(config.parallel_slots, 0);
+        assert_eq!(config.http_threads, 0);
         assert_eq!(config.log_retention_days, 7);
     }
 
@@ -363,6 +369,8 @@ mod tests {
         assert!(config.restart_on_crash);
         assert_eq!(config.gpu_layers, "auto");
         assert_eq!(config.threads, 0);
+        assert_eq!(config.parallel_slots, 0);
+        assert_eq!(config.http_threads, 0);
         assert_eq!(config.log_retention_days, 7);
     }
 

@@ -24,14 +24,14 @@ Tauri 默认产物：
 
 ```text
 src-tauri\target\release\local-rerank-server.exe
-src-tauri\target\release\bundle\nsis\Local AI Services_0.1.0_x64-setup.exe
+src-tauri\target\release\bundle\nsis\Local AI Services_0.1.1_x64-setup.exe
 ```
 
 仓库交付目录可能包含同步副本：
 
 ```text
-release\Local AI Services 0.1.0\Local AI Services.exe
-release\Local AI Services 0.1.0\Local AI Services_0.1.0_x64-setup.exe
+release\Local AI Services 0.1.1\Local AI Services.exe
+release\Local AI Services 0.1.1\Local AI Services_0.1.1_x64-setup.exe
 ```
 
 如果版本号或产品名变化，要同步：
@@ -100,9 +100,9 @@ npm run tauri:build
 `.github/workflows/release.yml` 在推送 `vMAJOR.MINOR.PATCH` tag 时触发，例如：
 
 ```powershell
-git tag v0.1.0
+git tag v0.1.1
 git push origin master
-git push origin v0.1.0
+git push origin v0.1.1
 ```
 
 工作流会先校验 tag 版本号与以下文件一致：
@@ -122,7 +122,7 @@ git push origin v0.1.0
 
 工作流只发布安装包产物，不发布 llama.cpp runtime zip 或 GGUF 模型。运行时和模型仍按本文档“运行时”和“模型交付”章节处理。
 
-如果需要重跑某个已存在 tag 的发布，可以在 GitHub Actions 页面手动运行 `Release` 工作流并输入 tag，例如 `v0.1.0`。工作流会覆盖同名 Release asset。
+如果需要重跑某个已存在 tag 的发布，可以在 GitHub Actions 页面手动运行 `Release` 工作流并输入 tag，例如 `v0.1.1`。工作流会覆盖同名 Release asset。
 
 工作流也监听 `master` 分支 push，用于让新仓库在 GitHub Actions 页面注册工作流；发布构建 job 只会在 tag push 或手动输入 tag 时运行。
 
@@ -136,6 +136,7 @@ git push origin v0.1.0
 - 可以为两个服务选择 `.gguf` 模型。
 - `downloads\` 中存在 `llama-b*-bin-win-vulkan-x64.zip`。
 - 启动服务后“启动服务”按钮不可点。
+- 设置页可配置线程数、并发槽位和 HTTP 线程数，`0` 表示由 llama.cpp 自动决定。
 - 关闭设置窗口会询问最小化到托盘或退出。
 - 最小化到托盘后服务继续运行。
 - 日志目录为 `%LOCALAPPDATA%\LocalAIService\logs`。

@@ -1,6 +1,6 @@
 [package]
 name = "local-rerank-server"
-version = "0.1.0"
+version = "0.1.1"
 description = "Windows tray app for a local llama.cpp rerank server"
 authors = ["Local Rerank Server"]
 edition = "2021"

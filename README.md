@@ -16,7 +16,7 @@ Local AI Services is a Windows tray application that runs local Embedding and Re
 
 ## Quick Start
 
-1. Open `release\Local AI Services 0.1.0\Local AI Services.exe`, or install with `release\Local AI Services 0.1.0\Local AI Services_0.1.0_x64-setup.exe`.
+1. Open `release\Local AI Services 0.1.1\Local AI Services.exe`, or install with `release\Local AI Services 0.1.1\Local AI Services_0.1.1_x64-setup.exe`.
 2. Before first use, run the asset downloader:
 
 ```powershell
@@ -51,7 +51,9 @@ When the host is set to `0.0.0.0`, services listen on all network interfaces. Us
 | Protocol | Controls the public HTTP path, compatible request shape, and compatible response shape. |
 | Model file path | Use Browse to select a `.gguf` file, or paste a full path directly. |
 | GPU layers | `auto` lets llama.cpp choose, `all` offloads as much as possible, or use a non-negative integer. |
-| Threads | `0` lets llama.cpp choose automatically. |
+| Threads | Maps to llama.cpp `--threads`; `0` means automatic. |
+| Parallel slots | Maps to llama.cpp `--parallel` and controls same-service inference slots; `0` means automatic. |
+| HTTP threads | Maps to llama.cpp `--threads-http`; `0` means automatic. |
 | Auto-start enabled services | Starts enabled services when the app starts. |
 | Restart on crash | Restarts `llama-server.exe` after an unexpected exit. |
 | Log retention days | Defaults to 7 days. |
@@ -160,12 +162,12 @@ npm run tauri:build
 Main outputs:
 
 - `src-tauri\target\release\local-rerank-server.exe`
-- `src-tauri\target\release\bundle\nsis\Local AI Services_0.1.0_x64-setup.exe`
+- `src-tauri\target\release\bundle\nsis\Local AI Services_0.1.1_x64-setup.exe`
 
 The repository may also contain a copied delivery folder:
 
-- `release\Local AI Services 0.1.0\Local AI Services.exe`
-- `release\Local AI Services 0.1.0\Local AI Services_0.1.0_x64-setup.exe`
+- `release\Local AI Services 0.1.1\Local AI Services.exe`
+- `release\Local AI Services 0.1.1\Local AI Services_0.1.1_x64-setup.exe`
 
 The installer and exe include frontend assets, but no longer include the llama.cpp zip or GGUF models. Run `scripts\download-assets.ps1` to download the runtime into `%LOCALAPPDATA%\LocalAIService\downloads` and default models into `models\`. For customer delivery, ship those downloaded assets beside the app or ask the customer to run the script first.
 

@@ -288,7 +288,7 @@ h2 {
 }
 
 .shared-grid {
-  grid-template-columns: minmax(150px, 1fr) minmax(180px, 1.2fr) minmax(100px, 0.8fr) minmax(120px, 0.8fr);
+  grid-template-columns: minmax(150px, 1fr) minmax(180px, 1.2fr) repeat(4, minmax(110px, 0.8fr));
 }
 
 .service-grid {

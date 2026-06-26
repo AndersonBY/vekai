@@ -34,6 +34,8 @@ const EMPTY_CONFIG: AppConfig = {
   restart_on_crash: true,
   gpu_layers: "auto",
   threads: 0,
+  parallel_slots: 0,
+  http_threads: 0,
   log_retention_days: 7,
 };
 
@@ -61,6 +63,8 @@ const SERVICE_IMPACTING_CONFIG_FIELDS: Array<keyof AppConfig> = [
   "embedding",
   "gpu_layers",
   "threads",
+  "parallel_slots",
+  "http_threads",
 ];
 
 const TEXT = {
@@ -83,6 +87,8 @@ const TEXT = {
     gpuLayers: "GPU 层数",
     custom: "自定义",
     threads: "线程数",
+    parallelSlots: "并发槽位",
+    httpThreads: "HTTP 线程数",
     logRetentionDays: "日志保留天数",
     autoStart: "启动后自动开启已启用服务",
     restartOnCrash: "崩溃后自动重启",
@@ -171,6 +177,8 @@ const TEXT = {
     gpuLayers: "GPU layers",
     custom: "Custom",
     threads: "Threads",
+    parallelSlots: "Parallel slots",
+    httpThreads: "HTTP threads",
     logRetentionDays: "Log retention days",
     autoStart: "Auto-start enabled services",
     restartOnCrash: "Restart on crash",
@@ -826,6 +834,14 @@ export default function App() {
           <label>
             {t.threads}
             <input type="number" min={0} max={65535} value={config.threads} onChange={(event) => updateConfig("threads", Number(event.target.value))} />
+          </label>
+          <label>
+            {t.parallelSlots}
+            <input type="number" min={0} max={65535} value={config.parallel_slots} onChange={(event) => updateConfig("parallel_slots", Number(event.target.value))} />
+          </label>
+          <label>
+            {t.httpThreads}
+            <input type="number" min={0} max={65535} value={config.http_threads} onChange={(event) => updateConfig("http_threads", Number(event.target.value))} />
           </label>
           <label>
             {t.logRetentionDays}

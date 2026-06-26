@@ -13,6 +13,8 @@ export interface AppConfig {
   restart_on_crash: boolean;
   gpu_layers: string;
   threads: number;
+  parallel_slots: number;
+  http_threads: number;
   log_retention_days: number;
 }
 

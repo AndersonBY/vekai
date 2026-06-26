@@ -73,11 +73,15 @@ Rust app state and config
   "restart_on_crash": true,
   "gpu_layers": "auto",
   "threads": 0,
+  "parallel_slots": 0,
+  "http_threads": 0,
   "log_retention_days": 7
 }
 ```
 
 开发期不维护旧版顶层 Rerank 配置兼容。如果配置结构变化，直接同步文档和测试。
+
+`threads` 映射到 `llama-server --threads`，`parallel_slots` 映射到 `--parallel`，`http_threads` 映射到 `--threads-http`。这三个数字字段都使用 `0` 表示不传对应参数，由 llama.cpp 自动决定。
 
 ## 服务启动模型
 
@@ -87,11 +91,12 @@ Rust app state and config
 2. 确认服务已启用且模型路径存在。
 3. 确保已下载的 llama.cpp 运行时 zip 已解压。
 4. 根据协议决定是否需要本地代理。
-5. 启动 `llama-server.exe`。
+5. 按配置生成 `llama-server.exe` 参数并启动进程。
 6. 轮询 `/health`。
 7. 更新状态和最近日志。
 
 Rerank 和 Embedding 同时启用时不能使用同一个端口。
+Rerank 与 Embedding 分别由独立的 `llama-server.exe` 进程承载；同一个服务内的推理并发由 llama.cpp `--parallel` slot 决定，非原生协议代理只负责并发转发和协议转换。
 
 ## 协议模型
 

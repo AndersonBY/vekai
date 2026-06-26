@@ -65,6 +65,16 @@ pub fn build_service_llama_server_args_for_endpoint(
         args.push(config.threads.to_string());
     }
 
+    if config.parallel_slots > 0 {
+        args.push("--parallel".to_string());
+        args.push(config.parallel_slots.to_string());
+    }
+
+    if config.http_threads > 0 {
+        args.push("--threads-http".to_string());
+        args.push(config.http_threads.to_string());
+    }
+
     Ok(args)
 }
 
@@ -113,6 +123,8 @@ mod tests {
         let config = AppConfig {
             gpu_layers: "auto".to_string(),
             threads: 0,
+            parallel_slots: 0,
+            http_threads: 0,
             ..AppConfig::default()
         };
 
@@ -123,6 +135,8 @@ mod tests {
             .windows(2)
             .any(|window| window == ["--n-gpu-layers", "auto"]));
         assert!(!args.iter().any(|arg| arg == "--threads"));
+        assert!(!args.iter().any(|arg| arg == "--parallel"));
+        assert!(!args.iter().any(|arg| arg == "--threads-http"));
     }
 
     #[test]
@@ -140,6 +154,23 @@ mod tests {
         assert!(args
             .windows(2)
             .any(|window| window == ["--n-gpu-layers", "12"]));
+    }
+
+    #[test]
+    fn includes_parallel_and_http_threads_when_set() {
+        let config = AppConfig {
+            parallel_slots: 4,
+            http_threads: 6,
+            ..AppConfig::default()
+        };
+
+        let args = build_llama_server_args(&config, Path::new("model.gguf"))
+            .expect("valid config should build llama-server args");
+
+        assert!(args.windows(2).any(|window| window == ["--parallel", "4"]));
+        assert!(args
+            .windows(2)
+            .any(|window| window == ["--threads-http", "6"]));
     }
 
     #[test]

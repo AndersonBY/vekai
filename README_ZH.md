@@ -16,7 +16,7 @@ Local AI Services 是一个 Windows 托盘应用，用本机下载的 llama.cpp 
 
 ## 快速开始
 
-1. 打开 `release\Local AI Services 0.1.0\Local AI Services.exe`，或运行安装包 `release\Local AI Services 0.1.0\Local AI Services_0.1.0_x64-setup.exe`。
+1. 打开 `release\Local AI Services 0.1.1\Local AI Services.exe`，或运行安装包 `release\Local AI Services 0.1.1\Local AI Services_0.1.1_x64-setup.exe`。
 2. 首次使用前运行下载脚本：
 
 ```powershell
@@ -51,7 +51,9 @@ powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1
 | 接口协议 | 决定公开 HTTP 路径、请求兼容格式和响应兼容格式。 |
 | 模型文件路径 | 通过“选择文件”选择 `.gguf` 文件，也可以直接粘贴完整路径。 |
 | GPU 层数 | `auto` 自动选择，`all` 尽量全部放入 GPU，也可以填非负整数。 |
-| 线程数 | `0` 表示由 llama.cpp 自动决定。 |
+| 线程数 | 映射到 llama.cpp `--threads`，`0` 表示自动。 |
+| 并发槽位 | 映射到 llama.cpp `--parallel`，控制同一服务的推理并发 slot，`0` 表示自动。 |
+| HTTP 线程数 | 映射到 llama.cpp `--threads-http`，`0` 表示自动。 |
 | 启动后自动开启已启用服务 | 应用启动后自动启动已勾选的服务。 |
 | 崩溃后自动重启 | llama-server 异常退出后自动尝试重启。 |
 | 日志保留天数 | 默认保留 7 天。 |
@@ -160,12 +162,12 @@ npm run tauri:build
 主要输出：
 
 - `src-tauri\target\release\local-rerank-server.exe`
-- `src-tauri\target\release\bundle\nsis\Local AI Services_0.1.0_x64-setup.exe`
+- `src-tauri\target\release\bundle\nsis\Local AI Services_0.1.1_x64-setup.exe`
 
 仓库也可能同步一份交付目录：
 
-- `release\Local AI Services 0.1.0\Local AI Services.exe`
-- `release\Local AI Services 0.1.0\Local AI Services_0.1.0_x64-setup.exe`
+- `release\Local AI Services 0.1.1\Local AI Services.exe`
+- `release\Local AI Services 0.1.1\Local AI Services_0.1.1_x64-setup.exe`
 
 安装包和 exe 包含前端资源，但不再包含 llama.cpp zip 和 GGUF 模型。运行 `scripts\download-assets.ps1` 会把 runtime 下载到 `%LOCALAPPDATA%\LocalAIService\downloads`，把默认模型下载到 `models\`。交付客户时应同时提供这些下载后的资产，或让客户先运行脚本。
 

@@ -1,6 +1,6 @@
 # 架构说明
 
-Local AI Services 是一个桌面 GUI 与 CLI 服务双模式应用。它的核心职责是管理本机 `llama-server`/`llama-server.exe` 进程，并对外提供 Embedding 和 Rerank HTTP 服务。
+Vekai 是一个桌面 GUI 与 CLI 服务双模式应用。它的核心职责是管理本机 `llama-server`/`llama-server.exe` 进程，并对外提供 Embedding 和 Rerank HTTP 服务。
 
 ## 系统边界
 
@@ -50,7 +50,7 @@ Rust app state and config
 配置文件位置：
 
 ```text
-%APPDATA%\LocalAIService\config.json
+%APPDATA%\Vekai\config.json
 ```
 
 当前配置是以服务为单位组织的结构：
@@ -89,12 +89,12 @@ Rust app state and config
 无子命令启动时进入 Tauri GUI。CLI 子命令包括：
 
 ```text
-local-rerank-server serve
-local-rerank-server install-service
-local-rerank-server uninstall-service
+vekai serve
+vekai install-service
+vekai uninstall-service
 ```
 
-`serve` 前台启动所有已启用服务并等待退出信号。Linux 上的 `install-service` 写入用户级 systemd unit 到 `~/.config/systemd/user/local-ai-services.service` 并执行 `systemctl --user enable --now local-ai-services.service`。
+`serve` 前台启动所有已启用服务并等待退出信号。Linux 上的 `install-service` 写入用户级 systemd unit 到 `~/.config/systemd/user/vekai.service` 并执行 `systemctl --user enable --now vekai.service`。
 
 ## 服务启动模型
 
@@ -149,11 +149,11 @@ Embedding 协议：
 
 | 内容 | 路径 |
 | --- | --- |
-| 用户配置 | `%APPDATA%\LocalAIService\config.json` |
-| 本地数据根目录 | `%LOCALAPPDATA%\LocalAIService\` |
-| 日志目录 | `%LOCALAPPDATA%\LocalAIService\logs` |
-| 运行时解压目录 | `%LOCALAPPDATA%\LocalAIService\runtimes` |
-| 本机运行时下载目录 | `%LOCALAPPDATA%\LocalAIService\downloads` |
+| 用户配置 | `%APPDATA%\Vekai\config.json` |
+| 本地数据根目录 | `%LOCALAPPDATA%\Vekai\` |
+| 日志目录 | `%LOCALAPPDATA%\Vekai\logs` |
+| 运行时解压目录 | `%LOCALAPPDATA%\Vekai\runtimes` |
+| 本机运行时下载目录 | `%LOCALAPPDATA%\Vekai\downloads` |
 | 绿色版运行时下载目录 | exe 同级 `downloads\` |
 | 仓库开发下载目录 | `downloads\`，仅开发调试路径 |
 

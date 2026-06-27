@@ -47,7 +47,7 @@ npm run tauri:build
 
 | 区域 | 必须保持 |
 | --- | --- |
-| 数据目录 | 当前写入 `LocalAIService`，不能回退到 `LocalRerankServer`。 |
+| 数据目录 | 当前写入 `Vekai`，不能回退到 `LocalRerankServer`。 |
 | 端口 | Rerank 默认 `8012`，Embedding 默认 `8013`。 |
 | UI 语言 | 默认中文，允许切换英文。 |
 | 模型路径 | 用户通过文件选择器选择完整 `.gguf` 路径，不写死模型路径。 |

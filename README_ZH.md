@@ -1,8 +1,8 @@
-# Local AI Services
+# Vekai
 
 [English](README.md)
 
-Local AI Services 是一个 Windows 托盘应用，也提供 Linux GUI/CLI 服务模式，用本机下载的 llama.cpp 运行时同时提供 Embedding 和 Rerank HTTP 服务。Windows 用户启动 exe 后会先看到设置窗口，配置完成后可以最小化到系统托盘，让服务在后台持续运行。
+Vekai 是一个 Windows 托盘应用，也提供 Linux GUI/CLI 服务模式，用本机下载的 llama.cpp 运行时同时提供 Embedding 和 Rerank HTTP 服务。Windows 用户启动 exe 后会先看到设置窗口，配置完成后可以最小化到系统托盘，让服务在后台持续运行。
 
 ## 功能
 
@@ -17,7 +17,7 @@ Local AI Services 是一个 Windows 托盘应用，也提供 Linux GUI/CLI 服�
 
 ## 快速开始
 
-1. 打开 `release\Local AI Services 0.1.3\Local AI Services.exe`，或运行安装包 `release\Local AI Services 0.1.3\Local AI Services_0.1.3_x64-setup.exe`。
+1. 打开 `release\Vekai 0.1.4\Vekai.exe`，或运行安装包 `release\Vekai 0.1.4\Vekai_0.1.4_x64-setup.exe`。
 2. 首次使用前运行下载脚本：
 
 ```powershell
@@ -97,12 +97,12 @@ Embedding 支持：
 Linux 安装包同时支持桌面 GUI 和 CLI 服务模式：
 
 ```bash
-local-rerank-server serve
-local-rerank-server install-service
-local-rerank-server uninstall-service
+vekai serve
+vekai install-service
+vekai uninstall-service
 ```
 
-`install-service` 会安装用户级 systemd unit 到 `~/.config/systemd/user/local-ai-services.service`，并启动服务。GUI 和服务模式共用当前用户的配置、日志、runtime 和模型路径。需要无人登录后自动启动时，执行：
+`install-service` 会安装用户级 systemd unit 到 `~/.config/systemd/user/vekai.service`，并启动服务。GUI 和服务模式共用当前用户的配置、日志、runtime 和模型路径。需要无人登录后自动启动时，执行：
 
 ```bash
 loginctl enable-linger "$USER"
@@ -141,11 +141,11 @@ curl.exe http://127.0.0.1:8013/health
 
 | 内容 | 位置 |
 | --- | --- |
-| 用户配置 | `%APPDATA%\LocalAIService\config.json` |
-| 本地数据 | `%LOCALAPPDATA%\LocalAIService\` |
-| 日志目录 | `%LOCALAPPDATA%\LocalAIService\logs` |
-| 运行时下载目录 | `%LOCALAPPDATA%\LocalAIService\downloads`，也可手动放在 exe 同级 `downloads\` |
-| 运行时解压目录 | `%LOCALAPPDATA%\LocalAIService\runtimes` |
+| 用户配置 | `%APPDATA%\Vekai\config.json` |
+| 本地数据 | `%LOCALAPPDATA%\Vekai\` |
+| 日志目录 | `%LOCALAPPDATA%\Vekai\logs` |
+| 运行时下载目录 | `%LOCALAPPDATA%\Vekai\downloads`，也可手动放在 exe 同级 `downloads\` |
+| 运行时解压目录 | `%LOCALAPPDATA%\Vekai\runtimes` |
 | 默认下载配置 | `scripts\assets.json` |
 
 旧开发版本可能留下 `%LOCALAPPDATA%\LocalRerankServer\logs`，当前应用不会再写入这个旧目录。
@@ -186,15 +186,15 @@ npm run tauri:build
 
 主要输出：
 
-- `src-tauri\target\release\local-rerank-server.exe`
-- `src-tauri\target\release\bundle\nsis\Local AI Services_0.1.3_x64-setup.exe`
+- `src-tauri\target\release\vekai.exe`
+- `src-tauri\target\release\bundle\nsis\Vekai_0.1.4_x64-setup.exe`
 
 仓库也可能同步一份交付目录：
 
-- `release\Local AI Services 0.1.3\Local AI Services.exe`
-- `release\Local AI Services 0.1.3\Local AI Services_0.1.3_x64-setup.exe`
+- `release\Vekai 0.1.4\Vekai.exe`
+- `release\Vekai 0.1.4\Vekai_0.1.4_x64-setup.exe`
 
-安装包和 exe 包含前端资源，但不再包含 llama.cpp runtime archive 和 GGUF 模型。运行 `scripts\download-assets.ps1` 会把 runtime 下载到 `%LOCALAPPDATA%\LocalAIService\downloads`，把默认模型下载到 `models\`。交付客户时应同时提供这些下载后的资产，或让客户先运行脚本。
+安装包和 exe 包含前端资源，但不再包含 llama.cpp runtime archive 和 GGUF 模型。运行 `scripts\download-assets.ps1` 会把 runtime 下载到 `%LOCALAPPDATA%\Vekai\downloads`，把默认模型下载到 `models\`。交付客户时应同时提供这些下载后的资产，或让客户先运行脚本。
 
 ## 常见问题
 
@@ -208,7 +208,7 @@ npm run tauri:build
 
 **首次启动服务较慢**
 
-首次启动服务会把 `%LOCALAPPDATA%\LocalAIService\downloads\llama-b*-bin-<platform>.*` 解压到 `%LOCALAPPDATA%\LocalAIService\runtimes`，后续启动会复用已解压的运行时。如果缺少 runtime archive，先运行 `scripts\download-assets.ps1`。
+首次启动服务会把 `%LOCALAPPDATA%\Vekai\downloads\llama-b*-bin-<platform>.*` 解压到 `%LOCALAPPDATA%\Vekai\runtimes`，后续启动会复用已解压的运行时。如果缺少 runtime archive，先运行 `scripts\download-assets.ps1`。
 
 **Windows Defender 或防火墙提示**
 
@@ -220,4 +220,4 @@ npm run tauri:build
 
 **找不到新日志**
 
-当前日志目录是 `%LOCALAPPDATA%\LocalAIService\logs`。旧目录 `%LOCALAPPDATA%\LocalRerankServer\logs` 只是历史开发版本遗留。
+当前日志目录是 `%LOCALAPPDATA%\Vekai\logs`。旧目录 `%LOCALAPPDATA%\LocalRerankServer\logs` 只是历史开发版本遗留。

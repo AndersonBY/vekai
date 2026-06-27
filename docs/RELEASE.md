@@ -1,6 +1,6 @@
 # 发布与交付
 
-本文档记录 Local AI Services 的 Windows、macOS 和 Linux 打包交付事实。用户使用说明见 [../README_ZH.md](../README_ZH.md) 和 [../README.md](../README.md)。
+本文档记录 Vekai 的 Windows、macOS 和 Linux 打包交付事实。用户使用说明见 [../README_ZH.md](../README_ZH.md) 和 [../README.md](../README.md)。
 
 ## 打包命令
 
@@ -23,15 +23,15 @@ npm run tauri:build
 Tauri 默认产物：
 
 ```text
-src-tauri\target\release\local-rerank-server.exe
-src-tauri\target\release\bundle\nsis\Local AI Services_0.1.3_x64-setup.exe
+src-tauri\target\release\vekai.exe
+src-tauri\target\release\bundle\nsis\Vekai_0.1.4_x64-setup.exe
 ```
 
 仓库交付目录可能包含同步副本：
 
 ```text
-release\Local AI Services 0.1.3\Local AI Services.exe
-release\Local AI Services 0.1.3\Local AI Services_0.1.3_x64-setup.exe
+release\Vekai 0.1.4\Vekai.exe
+release\Vekai 0.1.4\Vekai_0.1.4_x64-setup.exe
 ```
 
 如果版本号或产品名变化，要同步：
@@ -46,13 +46,13 @@ release\Local AI Services 0.1.3\Local AI Services_0.1.3_x64-setup.exe
 llama.cpp runtime 不进 Git，也不再通过 `include_bytes!` 编进 exe。`scripts\download-assets.ps1` 会从 `ggml-org/llama.cpp` 最新 GitHub Release 自动选择当前平台的 runtime，并默认下载到：
 
 ```text
-%LOCALAPPDATA%\LocalAIService\downloads
+%LOCALAPPDATA%\Vekai\downloads
 ```
 
 应用启动服务时会搜索：
 
 ```text
-%LOCALAPPDATA%\LocalAIService\downloads
+%LOCALAPPDATA%\Vekai\downloads
 <exe-dir>\downloads
 <repo>\downloads
 ```
@@ -60,7 +60,7 @@ llama.cpp runtime 不进 Git，也不再通过 `include_bytes!` 编进 exe。`sc
 找到 runtime archive 后解压到：
 
 ```text
-%LOCALAPPDATA%\LocalAIService\runtimes
+%LOCALAPPDATA%\Vekai\runtimes
 ```
 
 运行时 marker 使用 archive 文件名和 SHA256 判断是否需要重新解压。更新 runtime 不要求改代码，但交付目录必须包含应用同级 `downloads\llama-b*-bin-<platform>.*`，或者客户先运行下载脚本把 runtime 放进本机数据目录。
@@ -111,9 +111,9 @@ npm run tauri:build
 `.github/workflows/release.yml` 在推送 `vMAJOR.MINOR.PATCH` tag 时触发，例如：
 
 ```powershell
-git tag v0.1.3
+git tag v0.1.4
 git push origin master
-git push origin v0.1.3
+git push origin v0.1.4
 ```
 
 工作流会先校验 tag 版本号与以下文件一致：
@@ -133,15 +133,15 @@ git push origin v0.1.3
 
 工作流会发布安装包产物和对应平台的 llama.cpp runtime archive，不发布 GGUF 模型。模型仍按本文档“模型交付”章节处理。
 
-如果需要重跑某个已存在 tag 的发布，可以在 GitHub Actions 页面手动运行 `Release` 工作流并输入 tag，例如 `v0.1.3`。工作流会覆盖同名 Release asset。
+如果需要重跑某个已存在 tag 的发布，可以在 GitHub Actions 页面手动运行 `Release` 工作流并输入 tag，例如 `v0.1.4`。工作流会覆盖同名 Release asset。
 
 工作流也监听 `master` 分支 push，用于让新仓库在 GitHub Actions 页面注册工作流；发布构建 job 只会在 tag push 或手动输入 tag 时运行。
 
 Linux `.deb` 包会额外包含服务模式说明文件：
 
 ```text
-/usr/share/doc/local-rerank-server/README-service.md
-/usr/share/doc/local-rerank-server/examples/local-ai-services.service
+/usr/share/doc/vekai/README-service.md
+/usr/share/doc/vekai/examples/vekai.service
 ```
 
 应用资源目录也会包含同一份 `linux-service/` 文件，方便 GUI 包内查看或复制。
@@ -155,13 +155,13 @@ Linux `.deb` 包会额外包含服务模式说明文件：
 - 设置窗口可切换中文/英文。
 - 可以为两个服务选择 `.gguf` 模型。
 - `downloads\` 中存在 `llama-b*-bin-win-vulkan-x64.zip`。
-- Linux 上 `local-rerank-server serve` 可以以前台服务模式启动。
-- Linux 上 `local-rerank-server install-service` 会安装用户级 systemd unit。
+- Linux 上 `vekai serve` 可以以前台服务模式启动。
+- Linux 上 `vekai install-service` 会安装用户级 systemd unit。
 - 启动服务后“启动服务”按钮不可点。
 - 设置页可配置线程数、并发槽位和 HTTP 线程数，`0` 表示由 llama.cpp 自动决定。
 - 关闭设置窗口会询问最小化到托盘或退出。
 - 最小化到托盘后服务继续运行。
-- 日志目录为 `%LOCALAPPDATA%\LocalAIService\logs`。
+- 日志目录为 `%LOCALAPPDATA%\Vekai\logs`。
 - 默认 Rerank 地址可访问 `/v1/rerank`。
 - 默认 Embedding 地址可访问 `/v1/embeddings`。
 
@@ -173,7 +173,7 @@ Linux `.deb` 包会额外包含服务模式说明文件：
 
 **安装包是否包含 llama.cpp 运行时？**
 
-不再包含。runtime archive 是下载资产，脚本默认放在 `%LOCALAPPDATA%\LocalAIService\downloads` 或对应系统的本地数据目录。交付客户时可以同时提供应用同级 `downloads\`，或者让客户先运行 `scripts\download-assets.ps1`。
+不再包含。runtime archive 是下载资产，脚本默认放在 `%LOCALAPPDATA%\Vekai\downloads` 或对应系统的本地数据目录。交付客户时可以同时提供应用同级 `downloads\`，或者让客户先运行 `scripts\download-assets.ps1`。
 
 **安装包是否必须包含模型？**
 
@@ -181,7 +181,7 @@ Linux `.deb` 包会额外包含服务模式说明文件：
 
 **旧日志目录还会被使用吗？**
 
-不会。当前目录是 `%LOCALAPPDATA%\LocalAIService\logs`。`LocalRerankServer` 只可能是旧开发版本遗留。
+不会。当前目录是 `%LOCALAPPDATA%\Vekai\logs`。`LocalRerankServer` 只可能是旧开发版本遗留。
 
 **客户机器没有 Vulkan 能力怎么办？**
 

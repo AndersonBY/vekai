@@ -33,7 +33,7 @@ pub fn linux_systemd_unit(executable: &Path) -> String {
     let executable = systemd_exec_arg(executable);
     format!(
         r#"[Unit]
-Description=Local AI Services embedding and rerank server
+Description=Vekai embedding and rerank service
 
 [Service]
 Type=simple
@@ -65,7 +65,7 @@ mod tests {
     #[test]
     fn parse_cli_command_defaults_to_gui_without_subcommand() {
         assert_eq!(
-            parse_cli_command(["local-rerank-server"]).expect("command should parse"),
+            parse_cli_command(["vekai"]).expect("command should parse"),
             CliCommand::Gui
         );
     }
@@ -73,36 +73,34 @@ mod tests {
     #[test]
     fn parse_cli_command_recognizes_service_subcommands() {
         assert_eq!(
-            parse_cli_command(["local-rerank-server", "serve"]).expect("command should parse"),
+            parse_cli_command(["vekai", "serve"]).expect("command should parse"),
             CliCommand::Serve
         );
         assert_eq!(
-            parse_cli_command(["local-rerank-server", "install-service"])
-                .expect("command should parse"),
+            parse_cli_command(["vekai", "install-service"]).expect("command should parse"),
             CliCommand::InstallService
         );
         assert_eq!(
-            parse_cli_command(["local-rerank-server", "uninstall-service"])
-                .expect("command should parse"),
+            parse_cli_command(["vekai", "uninstall-service"]).expect("command should parse"),
             CliCommand::UninstallService
         );
     }
 
     #[test]
     fn linux_systemd_unit_runs_same_binary_in_serve_mode() {
-        let unit = linux_systemd_unit(Path::new("/usr/bin/local-rerank-server"));
+        let unit = linux_systemd_unit(Path::new("/usr/bin/vekai"));
 
-        assert!(unit.contains("Description=Local AI Services embedding and rerank server"));
+        assert!(unit.contains("Description=Vekai embedding and rerank service"));
         assert!(!unit.contains("network-online.target"));
-        assert!(unit.contains("ExecStart=/usr/bin/local-rerank-server serve"));
+        assert!(unit.contains("ExecStart=/usr/bin/vekai serve"));
         assert!(unit.contains("Restart=on-failure"));
         assert!(unit.contains("WantedBy=default.target"));
     }
 
     #[test]
     fn linux_systemd_unit_quotes_executable_paths_with_spaces() {
-        let unit = linux_systemd_unit(Path::new("/opt/Local AI Services/local-rerank-server"));
+        let unit = linux_systemd_unit(Path::new("/opt/Vekai App/vekai"));
 
-        assert!(unit.contains("ExecStart=\"/opt/Local AI Services/local-rerank-server\" serve"));
+        assert!(unit.contains("ExecStart=\"/opt/Vekai App/vekai\" serve"));
     }
 }

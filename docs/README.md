@@ -1,6 +1,6 @@
 # 文档地图
 
-本目录是 Local AI Services 的仓库知识库。根目录 [../AGENTS.md](../AGENTS.md) 只作为智能体入口地图，长期事实、设计解释、质量要求和发布步骤都应沉淀在这里。
+本目录是 Vekai 的仓库知识库。根目录 [../AGENTS.md](../AGENTS.md) 只作为智能体入口地图，长期事实、设计解释、质量要求和发布步骤都应沉淀在这里。
 
 ## 文档索引
 
@@ -23,8 +23,8 @@
 
 ## 当前项目事实
 
-- 产品名：`Local AI Services`
-- 当前数据目录名：`LocalAIService`
+- 产品名：`Vekai`
+- 当前数据目录名：`Vekai`
 - 默认 Rerank 端口：`8012`
 - 默认 Embedding 端口：`8013`
 - 运行时下载：`scripts/download-assets.ps1` 动态获取当前平台匹配的最新 llama.cpp runtime archive

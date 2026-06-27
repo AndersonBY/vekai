@@ -13,14 +13,14 @@ This repository is optimized for agentic development. Keep this file short: it i
 
 ## Product Snapshot
 
-Local AI Services is a Windows tray app and Linux GUI/CLI service app for running local GGUF-based Embedding and Rerank HTTP services. It is built with Tauri v2, Rust, React, and Vite. Matching llama.cpp runtimes and default GGUF models are downloaded by `scripts/download-assets.ps1` and are intentionally not tracked in Git.
+Vekai is a Windows tray app and Linux GUI/CLI service app for running local GGUF-based Embedding and Rerank HTTP services. It is built with Tauri v2, Rust, React, and Vite. Matching llama.cpp runtimes and default GGUF models are downloaded by `scripts/download-assets.ps1` and are intentionally not tracked in Git.
 
-The app name for user-facing data is `LocalAIService`:
+The app name for user-facing data is `Vekai`:
 
-- Config: `%APPDATA%\LocalAIService\config.json`
-- Logs: `%LOCALAPPDATA%\LocalAIService\logs`
-- Runtime extraction: `%LOCALAPPDATA%\LocalAIService\runtimes`
-- Runtime downloads: `%LOCALAPPDATA%\LocalAIService\downloads` or repository `downloads\`
+- Config: `%APPDATA%\Vekai\config.json`
+- Logs: `%LOCALAPPDATA%\Vekai\logs`
+- Runtime extraction: `%LOCALAPPDATA%\Vekai\runtimes`
+- Runtime downloads: `%LOCALAPPDATA%\Vekai\downloads` or repository `downloads\`
 
 Do not reintroduce `LocalRerankServer` for current paths. Mentions of that name should be historical only.
 
@@ -76,7 +76,7 @@ Supported protocol details live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - Rust behavior: run `cargo test --manifest-path src-tauri/Cargo.toml`.
 - Frontend/type changes: run `npm run build`.
 - Packaging or Windows app behavior: run `npm run tauri:build` when practical.
-- Linux service behavior: verify `local-rerank-server serve` and, when possible, `install-service` under WSL/Docker/Linux.
+- Linux service behavior: verify `vekai serve` and, when possible, `install-service` under WSL/Docker/Linux.
 - Runtime or model asset changes: run `powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1` and verify the downloaded files are ignored by Git.
 - Protocol changes: add or update Rust tests around request/response conversion.
 - UI changes: verify the settings window behavior, tray behavior, and Chinese/English text.

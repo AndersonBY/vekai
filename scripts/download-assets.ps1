@@ -25,7 +25,7 @@ if ([string]::IsNullOrWhiteSpace($AssetsFile)) {
     $AssetsFile = Join-Path $ScriptRoot 'assets.json'
 }
 if ([string]::IsNullOrWhiteSpace($DownloadDir)) {
-    $DownloadDir = Join-Path ([System.Environment]::GetFolderPath('LocalApplicationData')) 'LocalAIService\downloads'
+    $DownloadDir = Join-Path ([System.Environment]::GetFolderPath('LocalApplicationData')) 'Vekai\downloads'
 }
 if ([string]::IsNullOrWhiteSpace($ModelsDir)) {
     $ModelsDir = Join-Path $ProjectRoot 'models'
@@ -39,7 +39,7 @@ function Write-Step {
 function Get-GitHubApiHeaders {
     $headers = @{
         'Accept' = 'application/vnd.github+json'
-        'User-Agent' = 'LocalAIServiceAssetDownloader'
+        'User-Agent' = 'VekaiAssetDownloader'
         'X-GitHub-Api-Version' = '2022-11-28'
     }
 
@@ -129,7 +129,7 @@ function Invoke-ResumableDownload {
         return
     }
 
-    Invoke-WebRequest -Uri $Url -OutFile $OutFile -Headers @{ 'User-Agent' = 'LocalAIServiceAssetDownloader' }
+    Invoke-WebRequest -Uri $Url -OutFile $OutFile -Headers @{ 'User-Agent' = 'VekaiAssetDownloader' }
 }
 
 function Test-Asset {

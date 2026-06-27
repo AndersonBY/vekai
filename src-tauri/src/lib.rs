@@ -16,9 +16,13 @@ const TRAY_STOP_SERVER_ID: &str = "stop_server";
 const TRAY_RESTART_SERVER_ID: &str = "restart_server";
 const TRAY_OPEN_LOGS_ID: &str = "open_logs";
 const TRAY_QUIT_ID: &str = "quit";
+const PRODUCT_NAME: &str = "Vekai";
+const CLI_BINARY_NAME: &str = "vekai";
+#[cfg(target_os = "linux")]
+const SYSTEMD_SERVICE_NAME: &str = "vekai.service";
 const CLOSE_CONFIRM_SCRIPT: &str = r#"
 (() => {
-  window.dispatchEvent(new CustomEvent('local-ai-services-close-requested'));
+  window.dispatchEvent(new CustomEvent('vekai-close-requested'));
 })();
 "#;
 
@@ -47,13 +51,13 @@ pub async fn run_service_foreground() -> anyhow::Result<()> {
     let state: SharedAppState = Arc::new(Mutex::new(AppStateInner::new(initial.config)));
     let managers = Arc::new(ServiceManagers::new());
     commands::start_servers_inner(&state, &managers, &paths).await?;
-    append_log(&paths.logs.app_log, "Local AI Services CLI service started")?;
+    append_log(&paths.logs.app_log, "Vekai CLI service started")?;
 
     match wait_for_shutdown_signal().await {
         Ok(()) => {
             append_log(
                 &paths.logs.app_log,
-                "Local AI Services CLI service stopping",
+                "Vekai CLI service stopping",
             )?;
         }
         Err(error) => {
@@ -68,7 +72,7 @@ pub async fn run_service_foreground() -> anyhow::Result<()> {
         manager.request_shutdown();
         manager.stop(state.clone(), paths.logs.clone()).await?;
     }
-    append_log(&paths.logs.app_log, "Local AI Services CLI service stopped")?;
+    append_log(&paths.logs.app_log, "Vekai CLI service stopped")?;
     Ok(())
 }
 
@@ -94,7 +98,7 @@ async fn wait_for_shutdown_signal() -> anyhow::Result<()> {
 
 pub fn print_cli_help() {
     println!(
-        "Local AI Services\n\nUsage:\n  local-rerank-server                 Start GUI tray app\n  local-rerank-server serve           Run enabled services in foreground\n  local-rerank-server install-service Install user systemd service on Linux\n  local-rerank-server uninstall-service Remove user systemd service on Linux"
+        "{PRODUCT_NAME}\n\nUsage:\n  {CLI_BINARY_NAME}                 Start GUI tray app\n  {CLI_BINARY_NAME} serve           Run enabled services in foreground\n  {CLI_BINARY_NAME} install-service Install user systemd service on Linux\n  {CLI_BINARY_NAME} uninstall-service Remove user systemd service on Linux"
     );
 }
 
@@ -111,12 +115,12 @@ pub fn install_user_service() -> anyhow::Result<()> {
         .join("user");
     fs::create_dir_all(&service_dir)
         .with_context(|| format!("failed to create {}", service_dir.display()))?;
-    let service_path = service_dir.join("local-ai-services.service");
+    let service_path = service_dir.join(SYSTEMD_SERVICE_NAME);
     fs::write(&service_path, cli::linux_systemd_unit(&exe))
         .with_context(|| format!("failed to write {}", service_path.display()))?;
 
     run_systemctl_user(["daemon-reload"])?;
-    run_systemctl_user(["enable", "--now", "local-ai-services.service"])?;
+    run_systemctl_user(["enable", "--now", SYSTEMD_SERVICE_NAME])?;
     println!(
         "Installed and started user service: {}",
         service_path.display()
@@ -140,8 +144,8 @@ pub fn uninstall_user_service() -> anyhow::Result<()> {
         .join(".config")
         .join("systemd")
         .join("user")
-        .join("local-ai-services.service");
-    let _ = run_systemctl_user(["disable", "--now", "local-ai-services.service"]);
+        .join(SYSTEMD_SERVICE_NAME);
+    let _ = run_systemctl_user(["disable", "--now", SYSTEMD_SERVICE_NAME]);
     if service_path.exists() {
         fs::remove_file(&service_path)
             .with_context(|| format!("failed to remove {}", service_path.display()))?;
@@ -425,7 +429,7 @@ mod tests {
     fn close_confirm_script_offers_quit_and_tray_choices() {
         assert!(!close_confirm_script().contains("window.confirm"));
         assert!(!close_confirm_script().contains("quit_app"));
-        assert!(close_confirm_script().contains("local-ai-services-close-requested"));
+        assert!(close_confirm_script().contains("vekai-close-requested"));
     }
 
     #[test]
@@ -676,7 +680,7 @@ fn setup_tray(app: &AppHandle<Wry>) -> tauri::Result<()> {
     let mut tray = TrayIconBuilder::new()
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .tooltip("Local AI Services")
+        .tooltip(PRODUCT_NAME)
         .on_menu_event(|app, event| match event.id().as_ref() {
             TRAY_OPEN_SETTINGS_ID => show_settings_window(app),
             TRAY_START_SERVER_ID => start_server_from_tray(app),
@@ -758,5 +762,5 @@ pub fn run() {
             quit_app,
         ])
         .run(tauri::generate_context!())
-        .expect("failed to run Local AI Services");
+        .expect("failed to run Vekai");
 }

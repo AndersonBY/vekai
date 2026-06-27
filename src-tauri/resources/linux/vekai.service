@@ -1,0 +1,11 @@
+[Unit]
+Description=Vekai embedding and rerank service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/vekai serve
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

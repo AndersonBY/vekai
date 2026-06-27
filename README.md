@@ -1,8 +1,8 @@
-# Local AI Services
+# Vekai
 
 [中文说明](README_ZH.md)
 
-Local AI Services is a Windows tray application that also provides Linux GUI/CLI service mode. It runs local Embedding and Rerank HTTP services with a locally downloaded llama.cpp runtime. Windows users can start the exe, configure GGUF model paths in the settings window, and keep the services running in the background from the system tray.
+Vekai is a Windows tray application that also provides Linux GUI/CLI service mode. It runs local Embedding and Rerank HTTP services with a locally downloaded llama.cpp runtime. Windows users can start the exe, configure GGUF model paths in the settings window, and keep the services running in the background from the system tray.
 
 ## Features
 
@@ -17,7 +17,7 @@ Local AI Services is a Windows tray application that also provides Linux GUI/CLI
 
 ## Quick Start
 
-1. Open `release\Local AI Services 0.1.3\Local AI Services.exe`, or install with `release\Local AI Services 0.1.3\Local AI Services_0.1.3_x64-setup.exe`.
+1. Open `release\Vekai 0.1.4\Vekai.exe`, or install with `release\Vekai 0.1.4\Vekai_0.1.4_x64-setup.exe`.
 2. Before first use, run the asset downloader:
 
 ```powershell
@@ -97,12 +97,12 @@ Non-native protocols run through an app-managed local protocol proxy. The public
 Linux packages support both desktop GUI startup and CLI service mode:
 
 ```bash
-local-rerank-server serve
-local-rerank-server install-service
-local-rerank-server uninstall-service
+vekai serve
+vekai install-service
+vekai uninstall-service
 ```
 
-`install-service` installs and starts a user-level systemd unit at `~/.config/systemd/user/local-ai-services.service`. GUI and service mode share the current user's config, logs, runtime, and model paths. For startup before user login, run:
+`install-service` installs and starts a user-level systemd unit at `~/.config/systemd/user/vekai.service`. GUI and service mode share the current user's config, logs, runtime, and model paths. For startup before user login, run:
 
 ```bash
 loginctl enable-linger "$USER"
@@ -141,11 +141,11 @@ curl.exe http://127.0.0.1:8013/health
 
 | Content | Location |
 | --- | --- |
-| User config | `%APPDATA%\LocalAIService\config.json` |
-| Local data | `%LOCALAPPDATA%\LocalAIService\` |
-| Logs | `%LOCALAPPDATA%\LocalAIService\logs` |
-| Runtime downloads | `%LOCALAPPDATA%\LocalAIService\downloads`, or an exe-adjacent `downloads\` folder |
-| Extracted runtime | `%LOCALAPPDATA%\LocalAIService\runtimes` |
+| User config | `%APPDATA%\Vekai\config.json` |
+| Local data | `%LOCALAPPDATA%\Vekai\` |
+| Logs | `%LOCALAPPDATA%\Vekai\logs` |
+| Runtime downloads | `%LOCALAPPDATA%\Vekai\downloads`, or an exe-adjacent `downloads\` folder |
+| Extracted runtime | `%LOCALAPPDATA%\Vekai\runtimes` |
 | Default asset manifest | `scripts\assets.json` |
 
 Older development builds may have created `%LOCALAPPDATA%\LocalRerankServer\logs`. Current builds no longer write to that old directory.
@@ -186,15 +186,15 @@ npm run tauri:build
 
 Main outputs:
 
-- `src-tauri\target\release\local-rerank-server.exe`
-- `src-tauri\target\release\bundle\nsis\Local AI Services_0.1.3_x64-setup.exe`
+- `src-tauri\target\release\vekai.exe`
+- `src-tauri\target\release\bundle\nsis\Vekai_0.1.4_x64-setup.exe`
 
 The repository may also contain a copied delivery folder:
 
-- `release\Local AI Services 0.1.3\Local AI Services.exe`
-- `release\Local AI Services 0.1.3\Local AI Services_0.1.3_x64-setup.exe`
+- `release\Vekai 0.1.4\Vekai.exe`
+- `release\Vekai 0.1.4\Vekai_0.1.4_x64-setup.exe`
 
-The installer and exe include frontend assets, but no longer include the llama.cpp runtime archive or GGUF models. Run `scripts\download-assets.ps1` to download the runtime into `%LOCALAPPDATA%\LocalAIService\downloads` and default models into `models\`. For customer delivery, ship those downloaded assets beside the app or ask the customer to run the script first.
+The installer and exe include frontend assets, but no longer include the llama.cpp runtime archive or GGUF models. Run `scripts\download-assets.ps1` to download the runtime into `%LOCALAPPDATA%\Vekai\downloads` and default models into `models\`. For customer delivery, ship those downloaded assets beside the app or ask the customer to run the script first.
 
 ## Troubleshooting
 
@@ -208,7 +208,7 @@ Click Browse in the corresponding service panel and choose the correct `.gguf` m
 
 **The first service startup is slow**
 
-The first service startup extracts `%LOCALAPPDATA%\LocalAIService\downloads\llama-b*-bin-<platform>.*` into `%LOCALAPPDATA%\LocalAIService\runtimes`. Later starts reuse the extracted runtime. If the runtime archive is missing, run `scripts\download-assets.ps1` first.
+The first service startup extracts `%LOCALAPPDATA%\Vekai\downloads\llama-b*-bin-<platform>.*` into `%LOCALAPPDATA%\Vekai\runtimes`. Later starts reuse the extracted runtime. If the runtime archive is missing, run `scripts\download-assets.ps1` first.
 
 **Windows Defender or firewall prompts**
 
@@ -220,4 +220,4 @@ Make sure the GPU driver supports Vulkan. To isolate GPU issues, set GPU layers 
 
 **New logs are missing**
 
-Current logs are written to `%LOCALAPPDATA%\LocalAIService\logs`. `%LOCALAPPDATA%\LocalRerankServer\logs` is only a historical development directory.
+Current logs are written to `%LOCALAPPDATA%\Vekai\logs`. `%LOCALAPPDATA%\LocalRerankServer\logs` is only a historical development directory.

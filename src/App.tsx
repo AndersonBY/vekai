@@ -69,7 +69,7 @@ const SERVICE_IMPACTING_CONFIG_FIELDS: Array<keyof AppConfig> = [
 
 const TEXT = {
   zh: {
-    appTitle: "本地 AI 服务",
+    appTitle: "Vekai",
     subtitle: "llama.cpp 嵌入与重排序服务",
     language: "界面语言",
     chinese: "中文",
@@ -159,7 +159,7 @@ const TEXT = {
     },
   },
   en: {
-    appTitle: "Local AI Services",
+    appTitle: "Vekai",
     subtitle: "llama.cpp embedding and rerank services",
     language: "Language",
     chinese: "中文",
@@ -563,9 +563,9 @@ export default function App() {
       setClosePromptOpen(true);
     }
 
-    window.addEventListener("local-ai-services-close-requested", handleCloseRequested);
+    window.addEventListener("vekai-close-requested", handleCloseRequested);
     return () => {
-      window.removeEventListener("local-ai-services-close-requested", handleCloseRequested);
+      window.removeEventListener("vekai-close-requested", handleCloseRequested);
     };
   }, []);
 

@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::State;
 
-const APP_DATA_DIR_NAME: &str = "LocalAIService";
+const APP_DATA_DIR_NAME: &str = "Vekai";
 
 #[derive(Debug, Clone)]
 pub struct AppPaths {
@@ -818,15 +818,18 @@ mod tests {
     fn app_paths_use_current_product_data_directory_name() {
         let paths = build_app_paths().expect("app paths should resolve");
 
-        assert!(paths
+        assert!(paths.config_path.to_string_lossy().contains("Vekai"));
+        assert!(paths.local_data_dir.to_string_lossy().contains("Vekai"));
+        assert!(paths.logs.log_dir.to_string_lossy().contains("Vekai"));
+        assert!(!paths
             .config_path
             .to_string_lossy()
             .contains("LocalAIService"));
-        assert!(paths
+        assert!(!paths
             .local_data_dir
             .to_string_lossy()
             .contains("LocalAIService"));
-        assert!(paths
+        assert!(!paths
             .logs
             .log_dir
             .to_string_lossy()

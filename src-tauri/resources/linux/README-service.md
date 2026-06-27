@@ -1,17 +1,17 @@
 # Linux Service Mode
 
-The same Local AI Services binary can run as a GUI tray app or as a foreground service process.
+The same Vekai binary can run as a GUI tray app or as a foreground service process.
 
 ```bash
-local-rerank-server serve
-local-rerank-server install-service
-local-rerank-server uninstall-service
+vekai serve
+vekai install-service
+vekai uninstall-service
 ```
 
 `install-service` installs a user-level systemd unit at:
 
 ```text
-~/.config/systemd/user/local-ai-services.service
+~/.config/systemd/user/vekai.service
 ```
 
 It uses the same user config and data directories as the GUI app. To start the service before the user logs in, enable lingering for that user:

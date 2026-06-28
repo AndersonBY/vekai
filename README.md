@@ -2,29 +2,29 @@
 
 [中文说明](README_ZH.md)
 
-Vekai is a Windows tray application that also provides Linux GUI/CLI service mode. It runs local Embedding and Rerank HTTP services with a locally downloaded llama.cpp runtime. Windows users can start the exe, configure GGUF model paths in the settings window, and keep the services running in the background from the system tray.
+Vekai is a Windows tray application that also provides Linux GUI/CLI service mode. It runs local Embedding and Rerank HTTP services with a bundled or locally downloaded llama.cpp runtime. Windows users can start the exe, configure GGUF model paths in the settings window, and keep the services running in the background from the system tray.
 
 ## Features
 
 - Runs local Embedding and Rerank services at the same time.
 - Lets users choose any `.gguf` model file path instead of requiring a fixed model directory.
-- Provides `scripts\download-assets.ps1` to download the latest matching llama.cpp runtime for the current platform and default GGUF models.
+- Provides `scripts\download-assets.ps1` to download default GGUF models; source packaging and runtime override flows can also download the latest matching llama.cpp runtime.
 - Supports native llama.cpp endpoints plus SiliconFlow, Cohere, Jina, Voyage, and custom JSON HTTP compatible response shapes.
 - Starts with a Chinese UI by default and includes an English language switch.
 - Stays in the Windows system tray with actions for settings, logs, and quit.
 - Prompts on settings-window close to either minimize to tray or quit the application.
-- Release assets include matching llama.cpp runtime archives for Windows, macOS, and Linux; Linux builds support both GUI and `serve` service mode.
+- Windows, macOS, and Linux installers include the matching llama.cpp runtime; Linux builds support both GUI and `serve` service mode.
 
 ## Quick Start
 
-1. Open `release\Vekai 0.1.4\Vekai.exe`, or install with `release\Vekai 0.1.4\Vekai_0.1.4_x64-setup.exe`.
-2. Before first use, run the asset downloader:
+1. Open `release\Vekai 0.1.5\Vekai.exe`, or install with `release\Vekai 0.1.5\Vekai_0.1.5_x64-setup.exe`.
+2. The installer includes the matching llama.cpp runtime. To download default test models in a source checkout, run:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1
+powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1 -SkipRuntime
 ```
 
-3. In the settings window, choose one `.gguf` model for Rerank and one `.gguf` model for Embedding. The script downloads default models into the repository `models\` directory.
+3. In the settings window, choose one `.gguf` model for Rerank and one `.gguf` model for Embedding. The script downloads default test models into the repository `models\` directory.
 4. Confirm the host, ports, and protocol options.
 5. Click Save, then Start Services.
 6. Close the settings window and choose Minimize to Tray when you want the services to keep running in the background.
@@ -108,7 +108,7 @@ vekai uninstall-service
 loginctl enable-linger "$USER"
 ```
 
-The Release page includes matching llama.cpp runtime archives, for example `llama-b*-bin-ubuntu-arm64.tar.gz`. Place the matching archive in the user data `downloads/` directory or an app-adjacent `downloads/` directory before starting services.
+Linux packages include the matching llama.cpp runtime. To temporarily override the runtime, place a matching `llama-b*-bin-<platform>.*` archive in the user data `downloads/` directory or an app-adjacent `downloads/` directory.
 
 ## Request Examples
 
@@ -144,7 +144,7 @@ curl.exe http://127.0.0.1:8013/health
 | User config | `%APPDATA%\Vekai\config.json` |
 | Local data | `%LOCALAPPDATA%\Vekai\` |
 | Logs | `%LOCALAPPDATA%\Vekai\logs` |
-| Runtime downloads | `%LOCALAPPDATA%\Vekai\downloads`, or an exe-adjacent `downloads\` folder |
+| Runtime source | Bundled package `downloads/`; overridable via `%LOCALAPPDATA%\Vekai\downloads` or an exe-adjacent `downloads\` folder |
 | Extracted runtime | `%LOCALAPPDATA%\Vekai\runtimes` |
 | Default asset manifest | `scripts\assets.json` |
 
@@ -163,7 +163,8 @@ Common commands:
 
 ```powershell
 npm install
-powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1
+powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1 -SkipRuntime
+powershell -ExecutionPolicy Bypass -File scripts\prepare-bundled-runtime.ps1
 npm run tauri:dev
 npm run build
 cargo test --manifest-path src-tauri/Cargo.toml
@@ -187,14 +188,14 @@ npm run tauri:build
 Main outputs:
 
 - `src-tauri\target\release\vekai.exe`
-- `src-tauri\target\release\bundle\nsis\Vekai_0.1.4_x64-setup.exe`
+- `src-tauri\target\release\bundle\nsis\Vekai_0.1.5_x64-setup.exe`
 
 The repository may also contain a copied delivery folder:
 
-- `release\Vekai 0.1.4\Vekai.exe`
-- `release\Vekai 0.1.4\Vekai_0.1.4_x64-setup.exe`
+- `release\Vekai 0.1.5\Vekai.exe`
+- `release\Vekai 0.1.5\Vekai_0.1.5_x64-setup.exe`
 
-The installer and exe include frontend assets, but no longer include the llama.cpp runtime archive or GGUF models. Run `scripts\download-assets.ps1` to download the runtime into `%LOCALAPPDATA%\Vekai\downloads` and default models into `models\`. For customer delivery, ship those downloaded assets beside the app or ask the customer to run the script first.
+The installer and exe include frontend assets and the matching llama.cpp runtime archive. GGUF models are not bundled. In a source checkout, run `scripts\download-assets.ps1 -SkipRuntime` to download default test models into `models\`.
 
 ## Troubleshooting
 
@@ -208,7 +209,7 @@ Click Browse in the corresponding service panel and choose the correct `.gguf` m
 
 **The first service startup is slow**
 
-The first service startup extracts `%LOCALAPPDATA%\Vekai\downloads\llama-b*-bin-<platform>.*` into `%LOCALAPPDATA%\Vekai\runtimes`. Later starts reuse the extracted runtime. If the runtime archive is missing, run `scripts\download-assets.ps1` first.
+The first service startup extracts the bundled or local `downloads\llama-b*-bin-<platform>.*` archive into `%LOCALAPPDATA%\Vekai\runtimes`. Later starts reuse the extracted runtime. Before local source packaging, run `scripts\prepare-bundled-runtime.ps1`.
 
 **Windows Defender or firewall prompts**
 

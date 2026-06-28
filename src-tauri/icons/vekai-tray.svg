@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Vekai tray icon">
+  <path d="M38 34h50l42 122-24 66L38 34Z" fill="#0EA5A6"/>
+  <path d="M168 34h50l-68 188-24-66 42-122Z" fill="#2563EB"/>
+  <circle cx="128" cy="84" r="15" fill="#10B9B1"/>
+  <circle cx="128" cy="130" r="13" fill="#F59E0B"/>
+</svg>

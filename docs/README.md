@@ -27,7 +27,7 @@
 - 当前数据目录名：`Vekai`
 - 默认 Rerank 端口：`8012`
 - 默认 Embedding 端口：`8013`
-- 运行时下载：`scripts/download-assets.ps1` 动态获取当前平台匹配的最新 llama.cpp runtime archive
+- 运行时打包：`scripts/prepare-bundled-runtime.ps1` 动态获取当前平台匹配的最新 llama.cpp runtime archive 并放入安装包资源
 - 模型下载：`scripts/assets.json` 中定义默认 GGUF 模型 URL、大小和 SHA256
 - 默认 UI 语言：中文，可切换英文
 - 主要技术栈：Tauri v2、Rust、React、Vite、llama.cpp

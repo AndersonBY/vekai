@@ -6,6 +6,11 @@ release/
 docs/superpowers/
 downloads/*
 !downloads/.gitkeep
+bundle-resources/*
+!bundle-resources/.gitkeep
+!bundle-resources/downloads/
+bundle-resources/downloads/*
+!bundle-resources/downloads/.gitkeep
 llama-*-bin-win-*.zip
 models/*.gguf
 *.tsbuildinfo

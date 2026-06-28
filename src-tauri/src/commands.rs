@@ -185,6 +185,10 @@ pub async fn test_embedding(
 }
 
 pub fn build_app_paths() -> anyhow::Result<AppPaths> {
+    build_app_paths_with_resource_dir(None)
+}
+
+pub fn build_app_paths_with_resource_dir(resource_dir: Option<&Path>) -> anyhow::Result<AppPaths> {
     let exe = std::env::current_exe().context("failed to resolve current executable")?;
     let exe_dir = exe
         .parent()
@@ -199,8 +203,14 @@ pub fn build_app_paths() -> anyhow::Result<AppPaths> {
     let current_dir = std::env::current_dir().context("failed to resolve current directory")?;
     let cargo_manifest_dir = option_env!("CARGO_MANIFEST_DIR").map(Path::new);
     let model_base_dir = resolve_model_base_dir(&exe_dir, cargo_manifest_dir, &current_dir);
-    let download_dirs =
-        resolve_download_dirs(&exe_dir, &local_data_dir, cargo_manifest_dir, &current_dir);
+    let resource_dirs = resolve_resource_dirs(&exe_dir, resource_dir);
+    let download_dirs = resolve_download_dirs(
+        &exe_dir,
+        &local_data_dir,
+        &resource_dirs,
+        cargo_manifest_dir,
+        &current_dir,
+    );
     let logs = log_paths(&local_data_dir);
 
     Ok(AppPaths {
@@ -633,12 +643,16 @@ fn resolve_model_base_dir(
 fn resolve_download_dirs(
     exe_dir: &Path,
     local_data_dir: &Path,
+    resource_dirs: &[PathBuf],
     #[cfg_attr(not(debug_assertions), allow(unused_variables))] cargo_manifest_dir: Option<&Path>,
     #[cfg_attr(not(debug_assertions), allow(unused_variables))] current_dir: &Path,
 ) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     candidates.push(local_data_dir.join("downloads"));
     candidates.push(exe_dir.join("downloads"));
+    for resource_dir in resource_dirs {
+        candidates.push(resource_dir.join("downloads"));
+    }
 
     #[cfg(debug_assertions)]
     {
@@ -652,6 +666,48 @@ fn resolve_download_dirs(
     }
 
     dedupe_paths(candidates)
+}
+
+fn resolve_resource_dirs(exe_dir: &Path, resource_dir: Option<&Path>) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(resource_dir) = resource_dir {
+        candidates.push(resource_dir.to_path_buf());
+    }
+    candidates.extend(default_resource_dirs(exe_dir));
+    dedupe_paths(candidates)
+}
+
+fn default_resource_dirs(exe_dir: &Path) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    #[cfg(target_os = "windows")]
+    {
+        candidates.push(exe_dir.to_path_buf());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        candidates.push(exe_dir.join("../Resources"));
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(appdir) = std::env::var_os("APPDIR") {
+            candidates.push(PathBuf::from(appdir).join("usr").join("lib").join("vekai"));
+        }
+        candidates.push(PathBuf::from("/usr/lib/vekai"));
+        if exe_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == "debug" || name == "release")
+        {
+            if let Some(target_dir) = exe_dir.parent() {
+                candidates.push(target_dir.join("lib").join("vekai"));
+            }
+        }
+    }
+
+    candidates
 }
 
 fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
@@ -847,6 +903,26 @@ mod tests {
             .log_dir
             .to_string_lossy()
             .contains("LocalRerankServer"));
+    }
+
+    #[test]
+    fn download_dirs_include_bundled_resource_downloads() {
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let exe_dir = temp_dir.path().join("app");
+        let local_data_dir = temp_dir.path().join("local-data");
+        let resource_dir = temp_dir.path().join("resources");
+
+        let download_dirs = resolve_download_dirs(
+            &exe_dir,
+            &local_data_dir,
+            &[resource_dir.clone()],
+            None,
+            temp_dir.path(),
+        );
+
+        assert_eq!(download_dirs[0], local_data_dir.join("downloads"));
+        assert_eq!(download_dirs[1], exe_dir.join("downloads"));
+        assert_eq!(download_dirs[2], resource_dir.join("downloads"));
     }
 
     #[test]

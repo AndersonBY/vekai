@@ -147,11 +147,11 @@ jobs:
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --target ${{ matrix.target }}
 
-      - name: Download llama.cpp runtime
+      - name: Prepare bundled llama.cpp runtime
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: ./scripts/download-assets.ps1 -RuntimePlatform ${{ matrix.runtime-platform }} -SkipModels -DownloadDir downloads
+        run: ./scripts/prepare-bundled-runtime.ps1 -RuntimePlatform ${{ matrix.runtime-platform }}
 
       - name: Build Tauri bundles
         run: npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --ci --no-sign

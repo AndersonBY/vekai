@@ -2,29 +2,29 @@
 
 [English](README.md)
 
-Vekai 是一个 Windows 托盘应用，也提供 Linux GUI/CLI 服务模式，用本机下载的 llama.cpp 运行时同时提供 Embedding 和 Rerank HTTP 服务。Windows 用户启动 exe 后会先看到设置窗口，配置完成后可以最小化到系统托盘，让服务在后台持续运行。
+Vekai 是一个 Windows 托盘应用，也提供 Linux GUI/CLI 服务模式，用安装包内置或本机下载的 llama.cpp 运行时同时提供 Embedding 和 Rerank HTTP 服务。Windows 用户启动 exe 后会先看到设置窗口，配置完成后可以最小化到系统托盘，让服务在后台持续运行。
 
 ## 功能
 
 - 同时管理本地 Embedding 服务和 Rerank 服务。
 - 支持任意 `.gguf` 模型文件路径，不要求模型放在固定目录。
-- 提供 `scripts\download-assets.ps1`，自动下载当前平台匹配的最新 llama.cpp 运行时和默认 GGUF 模型。
+- 提供 `scripts\download-assets.ps1` 下载默认 GGUF 模型；源码打包和 runtime 覆盖场景也可下载当前平台匹配的最新 llama.cpp 运行时。
 - 支持 llama.cpp 原生接口，以及兼容 SiliconFlow、Cohere、Jina、Voyage 和自定义 JSON HTTP 风格的响应协议。
 - 中文界面默认启用，也可以在设置页切换英文。
 - Windows 托盘常驻，支持打开设置、打开日志目录和退出程序。
 - 关闭设置窗口时会询问最小化到托盘还是退出程序。
-- Linux/macOS/Windows Release 会同时发布对应平台的 llama.cpp runtime 资产；Linux 版本支持 GUI 和 `serve` 服务模式。
+- Linux/macOS/Windows Release 安装包会内置对应平台的 llama.cpp runtime；Linux 版本支持 GUI 和 `serve` 服务模式。
 
 ## 快速开始
 
-1. 打开 `release\Vekai 0.1.4\Vekai.exe`，或运行安装包 `release\Vekai 0.1.4\Vekai_0.1.4_x64-setup.exe`。
-2. 首次使用前运行下载脚本：
+1. 打开 `release\Vekai 0.1.5\Vekai.exe`，或运行安装包 `release\Vekai 0.1.5\Vekai_0.1.5_x64-setup.exe`。
+2. 安装包已包含对应平台的 llama.cpp runtime。如需在源码仓库中下载默认测试模型，可以运行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1
+powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1 -SkipRuntime
 ```
 
-3. 在设置窗口中分别选择 Rerank 和 Embedding 的 `.gguf` 模型文件。脚本默认把模型下载到仓库的 `models\` 目录。
+3. 在设置窗口中分别选择 Rerank 和 Embedding 的 `.gguf` 模型文件。下载脚本默认把测试模型保存到仓库的 `models\` 目录。
 4. 确认端口、监听地址和接口协议。
 5. 点击“保存”，再点击“启动服务”。
 6. 不需要设置窗口时，关闭窗口并选择“最小化到托盘”。
@@ -108,7 +108,7 @@ vekai uninstall-service
 loginctl enable-linger "$USER"
 ```
 
-Release 页面会提供与安装包对应的 llama.cpp runtime 资产，例如 `llama-b*-bin-ubuntu-arm64.tar.gz`。把该文件放到用户数据目录的 `downloads/` 或应用同级 `downloads/` 后再启动服务。
+Linux 安装包会内置对应平台的 llama.cpp runtime。需要临时覆盖 runtime 时，可以把匹配的 `llama-b*-bin-<platform>.*` 放到用户数据目录的 `downloads/` 或应用同级 `downloads/`。
 
 ## 请求示例
 
@@ -144,7 +144,7 @@ curl.exe http://127.0.0.1:8013/health
 | 用户配置 | `%APPDATA%\Vekai\config.json` |
 | 本地数据 | `%LOCALAPPDATA%\Vekai\` |
 | 日志目录 | `%LOCALAPPDATA%\Vekai\logs` |
-| 运行时下载目录 | `%LOCALAPPDATA%\Vekai\downloads`，也可手动放在 exe 同级 `downloads\` |
+| 运行时来源 | 安装包内置 `downloads/`；可用 `%LOCALAPPDATA%\Vekai\downloads` 或 exe 同级 `downloads\` 覆盖 |
 | 运行时解压目录 | `%LOCALAPPDATA%\Vekai\runtimes` |
 | 默认下载配置 | `scripts\assets.json` |
 
@@ -163,7 +163,8 @@ curl.exe http://127.0.0.1:8013/health
 
 ```powershell
 npm install
-powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1
+powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1 -SkipRuntime
+powershell -ExecutionPolicy Bypass -File scripts\prepare-bundled-runtime.ps1
 npm run tauri:dev
 npm run build
 cargo test --manifest-path src-tauri/Cargo.toml
@@ -187,14 +188,14 @@ npm run tauri:build
 主要输出：
 
 - `src-tauri\target\release\vekai.exe`
-- `src-tauri\target\release\bundle\nsis\Vekai_0.1.4_x64-setup.exe`
+- `src-tauri\target\release\bundle\nsis\Vekai_0.1.5_x64-setup.exe`
 
 仓库也可能同步一份交付目录：
 
-- `release\Vekai 0.1.4\Vekai.exe`
-- `release\Vekai 0.1.4\Vekai_0.1.4_x64-setup.exe`
+- `release\Vekai 0.1.5\Vekai.exe`
+- `release\Vekai 0.1.5\Vekai_0.1.5_x64-setup.exe`
 
-安装包和 exe 包含前端资源，但不再包含 llama.cpp runtime archive 和 GGUF 模型。运行 `scripts\download-assets.ps1` 会把 runtime 下载到 `%LOCALAPPDATA%\Vekai\downloads`，把默认模型下载到 `models\`。交付客户时应同时提供这些下载后的资产，或让客户先运行脚本。
+安装包和 exe 包含前端资源，也包含对应平台的 llama.cpp runtime archive；GGUF 模型不包含在安装包内。源码仓库中运行 `scripts\download-assets.ps1 -SkipRuntime` 可以把默认测试模型下载到 `models\`。
 
 ## 常见问题
 
@@ -208,7 +209,7 @@ npm run tauri:build
 
 **首次启动服务较慢**
 
-首次启动服务会把 `%LOCALAPPDATA%\Vekai\downloads\llama-b*-bin-<platform>.*` 解压到 `%LOCALAPPDATA%\Vekai\runtimes`，后续启动会复用已解压的运行时。如果缺少 runtime archive，先运行 `scripts\download-assets.ps1`。
+首次启动服务会把安装包内置或本机 `downloads\` 中的 `llama-b*-bin-<platform>.*` 解压到 `%LOCALAPPDATA%\Vekai\runtimes`，后续启动会复用已解压的运行时。源码仓库本地打包前先运行 `scripts\prepare-bundled-runtime.ps1`。
 
 **Windows Defender 或防火墙提示**
 

@@ -4,10 +4,10 @@
 
 ## 打包命令
 
-先下载 runtime 和默认模型：
+先准备安装包内置 runtime。该命令会从 `ggml-org/llama.cpp` 最新 GitHub Release 下载当前平台匹配的 archive 到 `bundle-resources/downloads/`：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1
+powershell -ExecutionPolicy Bypass -File scripts\prepare-bundled-runtime.ps1
 ```
 
 再打包：
@@ -24,14 +24,14 @@ Tauri 默认产物：
 
 ```text
 src-tauri\target\release\vekai.exe
-src-tauri\target\release\bundle\nsis\Vekai_0.1.4_x64-setup.exe
+src-tauri\target\release\bundle\nsis\Vekai_0.1.5_x64-setup.exe
 ```
 
 仓库交付目录可能包含同步副本：
 
 ```text
-release\Vekai 0.1.4\Vekai.exe
-release\Vekai 0.1.4\Vekai_0.1.4_x64-setup.exe
+release\Vekai 0.1.5\Vekai.exe
+release\Vekai 0.1.5\Vekai_0.1.5_x64-setup.exe
 ```
 
 如果版本号或产品名变化，要同步：
@@ -43,17 +43,18 @@ release\Vekai 0.1.4\Vekai_0.1.4_x64-setup.exe
 
 ## 运行时
 
-llama.cpp runtime 不进 Git，也不再通过 `include_bytes!` 编进 exe。`scripts\download-assets.ps1` 会从 `ggml-org/llama.cpp` 最新 GitHub Release 自动选择当前平台的 runtime，并默认下载到：
+llama.cpp runtime 不进 Git，也不通过 `include_bytes!` 编进 exe。发布和本地打包前使用 `scripts/prepare-bundled-runtime.ps1` 从 `ggml-org/llama.cpp` 最新 GitHub Release 自动选择当前平台 runtime，并保存到：
 
 ```text
-%LOCALAPPDATA%\Vekai\downloads
+bundle-resources\downloads
 ```
 
-应用启动服务时会搜索：
+Tauri 打包会把该目录映射到安装包资源目录的 `downloads/`。应用启动服务时会按顺序搜索：
 
 ```text
 %LOCALAPPDATA%\Vekai\downloads
 <exe-dir>\downloads
+<bundle-resource-dir>\downloads
 <repo>\downloads
 ```
 
@@ -63,7 +64,7 @@ llama.cpp runtime 不进 Git，也不再通过 `include_bytes!` 编进 exe。`sc
 %LOCALAPPDATA%\Vekai\runtimes
 ```
 
-运行时 marker 使用 archive 文件名和 SHA256 判断是否需要重新解压。更新 runtime 不要求改代码，但交付目录必须包含应用同级 `downloads\llama-b*-bin-<platform>.*`，或者客户先运行下载脚本把 runtime 放进本机数据目录。
+运行时 marker 使用 archive 文件名和 SHA256 判断是否需要重新解压。更新 runtime 不要求改代码，但每个平台安装包必须包含对应平台的 `downloads\llama-b*-bin-<platform>.*`。本机数据目录和 exe 同级 `downloads\` 仍可用于调试或临时覆盖安装包内置 runtime。
 
 支持的 runtime 平台：
 
@@ -98,7 +99,7 @@ models\Qwen3-Embedding-0.6B-Q8_0.gguf
 
 ```powershell
 git diff --check
-powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1
+powershell -ExecutionPolicy Bypass -File scripts\prepare-bundled-runtime.ps1
 npm run build
 cargo test --manifest-path src-tauri/Cargo.toml
 npm run tauri:build
@@ -111,9 +112,9 @@ npm run tauri:build
 `.github/workflows/release.yml` 在推送 `vMAJOR.MINOR.PATCH` tag 时触发，例如：
 
 ```powershell
-git tag v0.1.4
+git tag v0.1.5
 git push origin master
-git push origin v0.1.4
+git push origin v0.1.5
 ```
 
 工作流会先校验 tag 版本号与以下文件一致：
@@ -131,9 +132,9 @@ git push origin v0.1.4
 - Ubuntu x64
 - Ubuntu ARM64
 
-工作流会发布安装包产物和对应平台的 llama.cpp runtime archive，不发布 GGUF 模型。模型仍按本文档“模型交付”章节处理。
+工作流会在各平台构建前下载对应平台的 llama.cpp runtime archive，并把它打进安装包资源目录；Release 页面发布安装包产物，不再要求用户单独下载 runtime archive。模型仍按本文档“模型交付”章节处理，不进安装包。
 
-如果需要重跑某个已存在 tag 的发布，可以在 GitHub Actions 页面手动运行 `Release` 工作流并输入 tag，例如 `v0.1.4`。工作流会覆盖同名 Release asset。
+如果需要重跑某个已存在 tag 的发布，可以在 GitHub Actions 页面手动运行 `Release` 工作流并输入 tag，例如 `v0.1.5`。工作流会覆盖同名 Release asset。
 
 工作流也监听 `master` 分支 push，用于让新仓库在 GitHub Actions 页面注册工作流；发布构建 job 只会在 tag push 或手动输入 tag 时运行。
 
@@ -154,7 +155,7 @@ Linux `.deb` 包会额外包含服务模式说明文件：
 - 启动后先打开设置窗口。
 - 设置窗口可切换中文/英文。
 - 可以为两个服务选择 `.gguf` 模型。
-- `downloads\` 中存在 `llama-b*-bin-win-vulkan-x64.zip`。
+- `bundle-resources\downloads\` 中存在且仅存在当前平台的 `llama-b*-bin-<platform>.*`。
 - Linux 上 `vekai serve` 可以以前台服务模式启动。
 - Linux 上 `vekai install-service` 会安装用户级 systemd unit。
 - 启动服务后“启动服务”按钮不可点。
@@ -173,7 +174,7 @@ Linux `.deb` 包会额外包含服务模式说明文件：
 
 **安装包是否包含 llama.cpp 运行时？**
 
-不再包含。runtime archive 是下载资产，脚本默认放在 `%LOCALAPPDATA%\Vekai\downloads` 或对应系统的本地数据目录。交付客户时可以同时提供应用同级 `downloads\`，或者让客户先运行 `scripts\download-assets.ps1`。
+包含。每个平台安装包会内置对应平台的 llama.cpp runtime archive，首次启动服务时解压到 `%LOCALAPPDATA%\Vekai\runtimes`。本机数据目录或 exe 同级 `downloads\` 中的匹配 archive 可用于临时覆盖。
 
 **安装包是否必须包含模型？**
 

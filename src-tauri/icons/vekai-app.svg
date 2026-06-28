@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Vekai app icon">
+  <rect x="18" y="18" width="220" height="220" rx="44" fill="#1F2933"/>
+  <path d="M58 48h44l31 104-20 54L58 48Z" fill="#12B8B2"/>
+  <path d="M154 48h44l-55 158-20-54 31-104Z" fill="#2563EB"/>
+  <circle cx="128" cy="84" r="11" fill="#12B8B2"/>
+  <circle cx="128" cy="119" r="10" fill="#2F7EF6"/>
+  <circle cx="128" cy="151" r="9" fill="#F59E0B"/>
+</svg>

@@ -1,11 +1,15 @@
-use crate::commands::{build_app_paths, load_initial_config, AppPaths, ServiceManagers};
+use crate::commands::{
+    build_app_paths, build_app_paths_with_resource_dir, load_initial_config, AppPaths,
+    ServiceManagers,
+};
 use crate::logging::{append_log, cleanup_old_logs, ensure_log_dir, LogPaths};
 use crate::state::{AppStateInner, ServiceStatus, SharedAppState};
 use std::path::Path;
 use std::sync::Arc;
+use tauri::image::Image;
 use tauri::menu::MenuBuilder;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, WindowEvent, Wry};
+use tauri::{include_image, AppHandle, Manager, WindowEvent, Wry};
 use tauri_plugin_opener::OpenerExt;
 use tokio::sync::Mutex;
 
@@ -20,6 +24,7 @@ const PRODUCT_NAME: &str = "Vekai";
 const CLI_BINARY_NAME: &str = "vekai";
 #[cfg(target_os = "linux")]
 const SYSTEMD_SERVICE_NAME: &str = "vekai.service";
+const TRAY_ICON: Image<'static> = include_image!("icons/32x32.png");
 const CLOSE_CONFIRM_SCRIPT: &str = r#"
 (() => {
   window.dispatchEvent(new CustomEvent('vekai-close-requested'));
@@ -439,6 +444,12 @@ mod tests {
         assert!(!should_intercept_window_close(""));
     }
 
+    #[test]
+    fn tray_icon_uses_dedicated_32px_mark() {
+        assert_eq!(TRAY_ICON.width(), 32);
+        assert_eq!(TRAY_ICON.height(), 32);
+    }
+
     #[cfg(unix)]
     #[test]
     fn unix_service_shutdown_listener_includes_sigterm() {
@@ -676,8 +687,8 @@ fn setup_tray(app: &AppHandle<Wry>) -> tauri::Result<()> {
         .separator()
         .text(TRAY_QUIT_ID, "退出")
         .build()?;
-    let icon = app.default_window_icon().cloned();
-    let mut tray = TrayIconBuilder::new()
+    let tray = TrayIconBuilder::new()
+        .icon(TRAY_ICON.clone())
         .menu(&menu)
         .show_menu_on_left_click(false)
         .tooltip(PRODUCT_NAME)
@@ -703,10 +714,6 @@ fn setup_tray(app: &AppHandle<Wry>) -> tauri::Result<()> {
             }
         });
 
-    if let Some(icon) = icon {
-        tray = tray.icon(icon);
-    }
-
     tray.build(app)?;
     Ok(())
 }
@@ -720,7 +727,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let paths = build_app_paths()?;
+            let resource_dir = app.path().resource_dir().ok();
+            let paths = build_app_paths_with_resource_dir(resource_dir.as_deref())?;
             ensure_log_dir(&paths.logs)?;
             let initial = load_initial_config(&paths)?;
             if let Some(warning) = initial.warning.as_deref() {

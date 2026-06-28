@@ -11,7 +11,7 @@ React Settings UI
         v
 Rust app state and config
         |
-        +--> runtime archive lookup and extraction
+        +--> bundled/local runtime archive lookup and extraction
         +--> model path validation
         +--> process supervision
         +--> protocol proxy
@@ -20,7 +20,7 @@ Rust app state and config
           llama-server
 ```
 
-前端只负责配置、状态展示、测试按钮和用户交互。服务启动、进程管理、配置持久化、日志、运行时 archive 查找/解压和协议转换都由 Rust 侧负责。
+前端只负责配置、状态展示、测试按钮和用户交互。服务启动、进程管理、配置持久化、日志、安装包内置或本机 runtime archive 查找/解压和协议转换都由 Rust 侧负责。
 
 ## 主要模块
 
@@ -36,9 +36,10 @@ Rust app state and config
 | `src-tauri/src/llama_args.rs` | 根据配置和模型路径生成 `llama-server` 参数。 |
 | `src-tauri/src/cli.rs` | 解析 CLI 子命令并生成 Linux systemd unit 内容。 |
 | `src-tauri/src/process.rs` | 子进程启动、健康检查、停止、崩溃重启和日志汇总。 |
-| `src-tauri/src/runtime.rs` | 已下载 llama.cpp runtime archive 的查找、哈希、解压和运行时布局。 |
+| `src-tauri/src/runtime.rs` | 安装包内置或已下载 llama.cpp runtime archive 的查找、哈希、解压和运行时布局。 |
 | `scripts/assets.json` | 默认 runtime/model 下载配置、模型大小和 SHA256。 |
-| `scripts/download-assets.ps1` | 资产下载脚本，下载当前平台匹配的 latest llama.cpp runtime 和默认 GGUF 模型。 |
+| `scripts/prepare-bundled-runtime.ps1` | 打包前准备脚本，下载当前平台匹配的 latest llama.cpp runtime 到安装包资源暂存目录。 |
+| `scripts/download-assets.ps1` | 资产下载脚本，可下载当前平台 runtime 和默认 GGUF 模型；用户通常只需用它下载模型。 |
 | `src-tauri/src/models.rs` | `.gguf` 模型发现、默认模型选择和展示数据。 |
 | `src-tauri/src/protocol_adapter.rs` | 各协议到 llama.cpp 原生 JSON 的请求/响应转换。 |
 | `src-tauri/src/protocol_proxy.rs` | 非原生协议的本地 HTTP 代理。 |
@@ -102,7 +103,7 @@ vekai uninstall-service
 
 1. 读取当前配置。
 2. 确认服务已启用且模型路径存在。
-3. 确保已下载的 llama.cpp 运行时 archive 已解压。
+3. 确保安装包内置或本机下载的 llama.cpp 运行时 archive 已解压。
 4. 根据协议决定是否需要本地代理。
 5. 按配置生成 `llama-server` 参数并启动进程。
 6. 轮询 `/health`。
@@ -155,6 +156,7 @@ Embedding 协议：
 | 运行时解压目录 | `%LOCALAPPDATA%\Vekai\runtimes` |
 | 本机运行时下载目录 | `%LOCALAPPDATA%\Vekai\downloads` |
 | 绿色版运行时下载目录 | exe 同级 `downloads\` |
+| 安装包内置运行时目录 | Tauri resource 目录下的 `downloads/` |
 | 仓库开发下载目录 | `downloads\`，仅开发调试路径 |
 
 旧开发版本可能留下 `%LOCALAPPDATA%\LocalRerankServer\logs`。当前代码不应再写入旧目录。

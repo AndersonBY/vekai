@@ -51,28 +51,7 @@ if (-not $bundleArtifacts) {
     throw "No Tauri bundle artifacts for version $version found under $bundleRoot"
 }
 
-$downloadRoot = Join-Path $root "downloads"
-$runtimeArtifacts = @()
-foreach ($pattern in @("*.zip", "*.tar.gz")) {
-    $runtimeArtifacts += Get-ChildItem -Path (Join-Path $downloadRoot $pattern) -File -ErrorAction SilentlyContinue
-}
-if ($RuntimePlatform) {
-    $runtimePattern = switch ($RuntimePlatform) {
-        'windows-x64' { '*-bin-win-vulkan-x64.zip' }
-        'windows-arm64' { '*-bin-win-cpu-arm64.zip' }
-        'ubuntu-x64' { '*-bin-ubuntu-x64.tar.gz' }
-        'ubuntu-arm64' { '*-bin-ubuntu-arm64.tar.gz' }
-        'macos-x64' { '*-bin-macos-x64.tar.gz' }
-        'macos-arm64' { '*-bin-macos-arm64.tar.gz' }
-    }
-    $runtimeArtifacts = $runtimeArtifacts | Where-Object { $_.Name -like $runtimePattern }
-}
-if (-not $runtimeArtifacts) {
-    $suffix = if ($RuntimePlatform) { " for $RuntimePlatform" } else { "" }
-    throw "No runtime archives$suffix found under $downloadRoot"
-}
-
-$artifacts = @($bundleArtifacts) + @($runtimeArtifacts)
+$artifacts = @($bundleArtifacts)
 $artifacts = $artifacts | Sort-Object FullName -Unique
 if (-not $artifacts) {
     throw "No Tauri bundle artifacts found under $bundleRoot"

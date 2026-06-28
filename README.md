@@ -17,7 +17,7 @@ Vekai is a Windows tray application that also provides Linux GUI/CLI service mod
 
 ## Quick Start
 
-1. Open `release\Vekai 0.1.5\Vekai.exe`, or install with `release\Vekai 0.1.5\Vekai_0.1.5_x64-setup.exe`.
+1. Open `release\Vekai 0.1.6\Vekai.exe`, or install with `release\Vekai 0.1.6\Vekai_0.1.6_x64-setup.exe`.
 2. The installer includes the matching llama.cpp runtime. To download default test models in a source checkout, run:
 
 ```powershell
@@ -188,12 +188,12 @@ npm run tauri:build
 Main outputs:
 
 - `src-tauri\target\release\vekai.exe`
-- `src-tauri\target\release\bundle\nsis\Vekai_0.1.5_x64-setup.exe`
+- `src-tauri\target\release\bundle\nsis\Vekai_0.1.6_x64-setup.exe`
 
 The repository may also contain a copied delivery folder:
 
-- `release\Vekai 0.1.5\Vekai.exe`
-- `release\Vekai 0.1.5\Vekai_0.1.5_x64-setup.exe`
+- `release\Vekai 0.1.6\Vekai.exe`
+- `release\Vekai 0.1.6\Vekai_0.1.6_x64-setup.exe`
 
 The installer and exe include frontend assets and the matching llama.cpp runtime archive. GGUF models are not bundled. In a source checkout, run `scripts\download-assets.ps1 -SkipRuntime` to download default test models into `models\`.
 

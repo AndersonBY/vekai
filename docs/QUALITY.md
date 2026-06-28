@@ -7,6 +7,7 @@
 ```powershell
 git diff --check
 powershell -ExecutionPolicy Bypass -File scripts\prepare-bundled-runtime.ps1
+npm run verify:icons
 npm run build
 cargo test --manifest-path src-tauri/Cargo.toml
 npm run tauri:build
@@ -40,6 +41,7 @@ npm run tauri:build
 - 运行 `npm run tauri:build`。
 - 检查 NSIS 安装包输出。
 - 检查生成 exe 不应弹出终端窗口。
+- 检查 `npm run verify:icons` 通过，打包 PNG 图标必须是 Tauri/macOS 可处理的 8-bit PNG。
 - 检查打包前已执行 `scripts\prepare-bundled-runtime.ps1`，且安装包内置当前平台 runtime。
 - 对用户可见生命周期变化，启动 release exe 做冒烟验证。
 
@@ -63,6 +65,7 @@ npm run tauri:build
 - 服务运行中仍允许点击“启动服务”。
 - 保存服务相关配置后没有重启运行中的服务。
 - 打包后缺前端资源或包内 runtime archive。
+- 新图标是 16-bit PNG，导致 macOS Tauri 打包失败。
 - 把 `downloads\` 或 `models\*.gguf` 误提交进 Git。
 - 日志写到旧目录。
 - 协议下拉有选项，但 Rust 配置白名单不接受。

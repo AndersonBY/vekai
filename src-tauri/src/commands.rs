@@ -7,7 +7,7 @@ use crate::process::ProcessManager;
 use crate::protocol_proxy::protocol_public_path;
 use crate::runtime::ensure_runtime_from_downloads;
 use crate::service::ServiceKind;
-use crate::state::{AppSnapshot, ServiceStatus, SharedAppState};
+use crate::state::{AppSnapshot, AppStateInner, ServiceStatus, SharedAppState};
 use anyhow::{anyhow, Context};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -315,6 +315,8 @@ pub async fn save_config_inner(
     append_log(&paths.logs.app_log, "Saved configuration")?;
 
     let mut state = state.lock().await;
+    let previous_config = state.config.clone();
+    clear_stale_service_failures_after_config_save(&mut state, &previous_config, &config);
     state.config = config;
     state.push_log("Saved configuration");
     Ok(state.snapshot_v2())
@@ -530,6 +532,36 @@ fn model_catalog_for_config(
         rerank_model.as_deref(),
         embedding_model.as_deref(),
     )
+}
+
+fn clear_stale_service_failures_after_config_save(
+    state: &mut AppStateInner,
+    previous: &AppConfig,
+    next: &AppConfig,
+) {
+    for service in ServiceKind::ALL {
+        if state.service_status(service) != ServiceStatus::Failed {
+            continue;
+        }
+
+        if service_launch_config_changed(service, previous, next) {
+            state.set_service_status(service, ServiceStatus::Stopped);
+            state.set_service_error(service, None);
+        }
+    }
+}
+
+fn service_launch_config_changed(
+    service: ServiceKind,
+    previous: &AppConfig,
+    next: &AppConfig,
+) -> bool {
+    previous.service_config(service) != next.service_config(service)
+        || previous.host != next.host
+        || previous.gpu_layers != next.gpu_layers
+        || previous.threads != next.threads
+        || previous.parallel_slots != next.parallel_slots
+        || previous.http_threads != next.http_threads
 }
 
 async fn record_service_failure(
@@ -843,9 +875,12 @@ mod tests {
     use crate::config::AppConfig;
     use crate::logging::log_paths;
     use crate::service::ServiceKind;
+    use crate::state::AppStateInner;
     use serde_json::json;
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
 
     #[test]
     fn load_initial_config_defaults_to_discovered_reranker_when_config_missing() {
@@ -1004,6 +1039,46 @@ mod tests {
                     .contains(".tmp-")),
             "atomic temp file should be renamed away"
         );
+    }
+
+    #[tokio::test]
+    async fn save_config_clears_stale_failed_model_error_when_model_path_changes() {
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let exe_dir = temp_dir.path().join("app");
+        fs::create_dir_all(exe_dir.join("models")).expect("models dir should be created");
+        let selected = temp_dir
+            .path()
+            .join("external-models")
+            .join("selected-rerank.gguf");
+        fs::create_dir_all(selected.parent().unwrap()).expect("model dir should be created");
+        fs::write(&selected, b"selected").expect("model should be written");
+        let paths = test_paths(exe_dir, temp_dir.path().join("config").join("config.json"));
+        let state: SharedAppState = Arc::new(Mutex::new(AppStateInner::new(AppConfig::default())));
+        {
+            let mut state = state.lock().await;
+            state.set_service_status(ServiceKind::Rerank, ServiceStatus::Failed);
+            state.set_service_error(
+                ServiceKind::Rerank,
+                Some("Rerank: failed to resolve model".to_string()),
+            );
+        }
+        let config = AppConfig {
+            rerank: crate::config::ServiceConfig::new(
+                true,
+                8012,
+                selected.to_string_lossy().into_owned(),
+            ),
+            ..AppConfig::default()
+        };
+
+        let snapshot = save_config_inner(config.clone(), &state, &paths)
+            .await
+            .expect("config should save");
+
+        assert_eq!(snapshot.config.rerank.model_path, config.rerank.model_path);
+        assert_eq!(snapshot.rerank.status, ServiceStatus::Stopped);
+        assert!(snapshot.rerank.error.is_none());
+        assert!(snapshot.error.is_none());
     }
 
     #[test]

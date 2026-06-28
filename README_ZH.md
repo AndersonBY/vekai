@@ -17,7 +17,7 @@ Vekai 是一个 Windows 托盘应用，也提供 Linux GUI/CLI 服务模式，�
 
 ## 快速开始
 
-1. 打开 `release\Vekai 0.1.6\Vekai.exe`，或运行安装包 `release\Vekai 0.1.6\Vekai_0.1.6_x64-setup.exe`。
+1. 打开 `release\Vekai 0.1.7\Vekai.exe`，或运行安装包 `release\Vekai 0.1.7\Vekai_0.1.7_x64-setup.exe`。
 2. 安装包已包含对应平台的 llama.cpp runtime。如需在源码仓库中下载默认测试模型，可以运行：
 
 ```powershell
@@ -188,12 +188,12 @@ npm run tauri:build
 主要输出：
 
 - `src-tauri\target\release\vekai.exe`
-- `src-tauri\target\release\bundle\nsis\Vekai_0.1.6_x64-setup.exe`
+- `src-tauri\target\release\bundle\nsis\Vekai_0.1.7_x64-setup.exe`
 
 仓库也可能同步一份交付目录：
 
-- `release\Vekai 0.1.6\Vekai.exe`
-- `release\Vekai 0.1.6\Vekai_0.1.6_x64-setup.exe`
+- `release\Vekai 0.1.7\Vekai.exe`
+- `release\Vekai 0.1.7\Vekai_0.1.7_x64-setup.exe`
 
 安装包和 exe 包含前端资源，也包含对应平台的 llama.cpp runtime archive；GGUF 模型不包含在安装包内。源码仓库中运行 `scripts\download-assets.ps1 -SkipRuntime` 可以把默认测试模型下载到 `models\`。
 

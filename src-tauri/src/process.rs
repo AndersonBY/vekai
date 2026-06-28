@@ -8,6 +8,7 @@ use crate::runtime::RuntimeLayout;
 use crate::service::ServiceKind;
 use crate::state::{ServiceStatus, SharedAppState};
 use anyhow::{anyhow, bail, Context};
+use std::net::TcpListener as StdTcpListener;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -58,7 +59,14 @@ struct ManagedChild {
 struct ServiceLaunch {
     args: Vec<String>,
     health_url: String,
+    ports: Vec<LaunchPort>,
     proxy_config: Option<ProtocolProxyConfig>,
+}
+
+#[derive(Debug, Clone)]
+struct LaunchPort {
+    host: String,
+    port: u16,
 }
 
 #[derive(Debug, Clone)]
@@ -267,6 +275,11 @@ async fn start_with_context_attempt(
         }
         reject_if_child_running(supervisor).await?;
 
+        if let Err(error) = ensure_launch_ports_available(supervisor.kind, &launch) {
+            fail_start(supervisor.kind, &state, &logs, &error.to_string()).await?;
+            return Err(error);
+        }
+
         let starting_message = service_message(supervisor.kind, "Starting llama-server.exe");
         set_status(
             &state,
@@ -438,6 +451,7 @@ fn build_service_launch(
     let public_port = config.service_port(service);
     let protocol = config.service_protocol(service);
     let plan = plan_protocol_launch(service, &config.host, public_port, protocol)?;
+    let ports = launch_ports_for_plan(&plan, &config.host);
     let (host, port) = if plan.use_proxy {
         ("127.0.0.1".to_string(), plan.llama_port)
     } else {
@@ -454,8 +468,63 @@ fn build_service_launch(
     Ok(ServiceLaunch {
         args,
         health_url,
+        ports,
         proxy_config: plan.proxy_config,
     })
+}
+
+fn launch_ports_for_plan(
+    plan: &crate::protocol_proxy::ProtocolLaunchPlan,
+    public_host: &str,
+) -> Vec<LaunchPort> {
+    let mut ports = vec![LaunchPort {
+        host: public_host.to_string(),
+        port: plan.public_port,
+    }];
+    if plan.use_proxy {
+        ports.push(LaunchPort {
+            host: "127.0.0.1".to_string(),
+            port: plan.llama_port,
+        });
+    }
+    ports
+}
+
+fn ensure_launch_ports_available(
+    service: ServiceKind,
+    launch: &ServiceLaunch,
+) -> anyhow::Result<()> {
+    for port in &launch.ports {
+        ensure_port_available(service, &port.host, port.port)?;
+    }
+
+    Ok(())
+}
+
+fn ensure_port_available(service: ServiceKind, host: &str, port: u16) -> anyhow::Result<()> {
+    for bind_host in probe_bind_hosts(host) {
+        let address = format!("{bind_host}:{port}");
+        match StdTcpListener::bind(&address) {
+            Ok(listener) => drop(listener),
+            Err(error) => {
+                bail!(
+                    "{} port is already in use at {address}: {error}",
+                    service.display_name()
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn probe_bind_hosts(host: &str) -> Vec<String> {
+    match host {
+        "0.0.0.0" => vec!["127.0.0.1".to_string()],
+        "::" => vec!["[::1]".to_string()],
+        value if value.contains(':') && !value.starts_with('[') => vec![format!("[{value}]")],
+        value => vec![value.to_string()],
+    }
 }
 
 async fn start_proxy_for_child(
@@ -1334,6 +1403,32 @@ mod tests {
         assert_eq!(launch.health_url, "http://127.0.0.1:8013/health");
     }
 
+    #[tokio::test]
+    async fn launch_port_check_rejects_occupied_public_port() {
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("public port reservation should bind");
+        let port = listener
+            .local_addr()
+            .expect("public listener address should be readable")
+            .port();
+        let config = AppConfig {
+            rerank: ServiceConfig::new(true, port, String::new()).with_protocol("llama_rerank"),
+            ..AppConfig::default()
+        };
+        let launch = build_service_launch(
+            ServiceKind::Rerank,
+            &config,
+            Path::new("C:\\models\\rank.gguf"),
+        )
+        .expect("launch should build before the actual start attempt");
+
+        let error = ensure_launch_ports_available(ServiceKind::Rerank, &launch)
+            .expect_err("occupied public port should be rejected");
+
+        assert!(error.to_string().contains(&format!("127.0.0.1:{port}")));
+    }
+
     #[test]
     fn child_stop_result_retains_child_on_inspect_or_kill_error() {
         assert!(ChildStopResult::AlreadyExited.should_clear_child());
@@ -1708,11 +1803,12 @@ mod tests {
         };
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .await
-            .expect("health responder listener should bind");
+            .expect("health probe port reservation should bind");
         let port = listener
             .local_addr()
-            .expect("health responder listener address should be available")
+            .expect("health probe listener address should be available")
             .port();
+        drop(listener);
         let config = AppConfig {
             rerank: ServiceConfig::new(true, port, String::new()),
             restart_on_crash: true,
@@ -1794,11 +1890,12 @@ mod tests {
         };
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .await
-            .expect("health responder listener should bind");
+            .expect("health responder port reservation should bind");
         let port = listener
             .local_addr()
             .expect("health responder listener address should be available")
             .port();
+        drop(listener);
         let config = AppConfig {
             rerank: ServiceConfig::new(true, port, String::new()),
             restart_on_crash: true,
@@ -1847,6 +1944,9 @@ mod tests {
             StartReason::Manual,
         ));
         wait_for_state(&state, ServiceStatus::Starting).await;
+        let listener = TcpListener::bind(("127.0.0.1", port))
+            .await
+            .expect("health responder listener should bind after startup begins");
         let health_responder = spawn_health_responder(listener);
 
         let second_result = tokio::time::timeout(Duration::from_secs(3), second_start)

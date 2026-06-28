@@ -66,6 +66,7 @@ const SERVICE_IMPACTING_CONFIG_FIELDS: Array<keyof AppConfig> = [
   "parallel_slots",
   "http_threads",
 ];
+const SNAPSHOT_POLL_INTERVAL_MS = 1000;
 
 const TEXT = {
   zh: {
@@ -326,6 +327,21 @@ function anyServiceRunning(snapshot: AppSnapshot | null): boolean {
   return snapshot?.rerank.status === "Running" || snapshot?.embedding.status === "Running";
 }
 
+function mergeSnapshotWithCurrentConfig(nextSnapshot: AppSnapshot, currentConfig: AppConfig): AppSnapshot {
+  return {
+    ...nextSnapshot,
+    config: currentConfig,
+    rerank: {
+      ...nextSnapshot.rerank,
+      config: currentConfig.rerank,
+    },
+    embedding: {
+      ...nextSnapshot.embedding,
+      config: currentConfig.embedding,
+    },
+  };
+}
+
 function allEnabledStopped(snapshot: AppSnapshot | null, config: AppConfig): boolean {
   if (snapshot === null) return true;
   return (
@@ -557,6 +573,30 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!anyServiceTransitioning(snapshot)) return;
+
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      void (async () => {
+        try {
+          const nextSnapshot = await invoke<AppSnapshot>("get_snapshot");
+          if (cancelled) return;
+          setSnapshot((current) =>
+            mergeSnapshotWithCurrentConfig(nextSnapshot, current?.config ?? config),
+          );
+        } catch (caught) {
+          if (!cancelled) setError(getErrorMessage(caught));
+        }
+      })();
+    }, SNAPSHOT_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [snapshot?.rerank.status, snapshot?.embedding.status]);
 
   useEffect(() => {
     function handleCloseRequested() {

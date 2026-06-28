@@ -86,6 +86,13 @@ pub async fn get_bootstrap(
 }
 
 #[tauri::command]
+pub async fn get_snapshot(
+    state: State<'_, SharedAppState>,
+) -> std::result::Result<AppSnapshot, String> {
+    Ok(get_snapshot_inner(state.inner()).await)
+}
+
+#[tauri::command]
 pub async fn save_config(
     config: AppConfig,
     state: State<'_, SharedAppState>,
@@ -302,6 +309,10 @@ pub async fn get_bootstrap_inner(
         logs_dir: paths.logs.log_dir.to_string_lossy().into_owned(),
         warning,
     })
+}
+
+pub async fn get_snapshot_inner(state: &SharedAppState) -> AppSnapshot {
+    snapshot(state).await
 }
 
 pub async fn save_config_inner(
@@ -1079,6 +1090,27 @@ mod tests {
         assert_eq!(snapshot.rerank.status, ServiceStatus::Stopped);
         assert!(snapshot.rerank.error.is_none());
         assert!(snapshot.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_snapshot_inner_returns_latest_runtime_status() {
+        let state: SharedAppState = Arc::new(Mutex::new(AppStateInner::new(AppConfig::default())));
+        {
+            let mut state = state.lock().await;
+            state.set_service_status(ServiceKind::Rerank, ServiceStatus::Running);
+            state.push_service_log(
+                ServiceKind::Rerank,
+                "llama-server.exe is running".to_string(),
+            );
+        }
+
+        let snapshot = get_snapshot_inner(&state).await;
+
+        assert_eq!(snapshot.rerank.status, ServiceStatus::Running);
+        assert_eq!(
+            snapshot.rerank.recent_logs,
+            vec!["llama-server.exe is running".to_string()]
+        );
     }
 
     #[test]

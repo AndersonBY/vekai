@@ -24,14 +24,14 @@ Tauri 默认产物：
 
 ```text
 src-tauri\target\release\vekai.exe
-src-tauri\target\release\bundle\nsis\Vekai_0.1.7_x64-setup.exe
+src-tauri\target\release\bundle\nsis\Vekai_0.1.8_x64-setup.exe
 ```
 
 仓库交付目录可能包含同步副本：
 
 ```text
-release\Vekai 0.1.7\Vekai.exe
-release\Vekai 0.1.7\Vekai_0.1.7_x64-setup.exe
+release\Vekai 0.1.8\Vekai.exe
+release\Vekai 0.1.8\Vekai_0.1.8_x64-setup.exe
 ```
 
 如果版本号或产品名变化，要同步：
@@ -113,9 +113,9 @@ npm run tauri:build
 `.github/workflows/release.yml` 在推送 `vMAJOR.MINOR.PATCH` tag 时触发，例如：
 
 ```powershell
-git tag v0.1.7
+git tag v0.1.8
 git push origin master
-git push origin v0.1.7
+git push origin v0.1.8
 ```
 
 工作流会先校验 tag 版本号与以下文件一致：
@@ -135,7 +135,7 @@ git push origin v0.1.7
 
 工作流会在各平台构建前下载对应平台的 llama.cpp runtime archive，并把它打进安装包资源目录；Release 页面发布安装包产物，不再要求用户单独下载 runtime archive。模型仍按本文档“模型交付”章节处理，不进安装包。
 
-如果需要重跑某个已存在 tag 的发布，可以在 GitHub Actions 页面手动运行 `Release` 工作流并输入 tag，例如 `v0.1.7`。工作流会覆盖同名 Release asset。
+如果需要重跑某个已存在 tag 的发布，可以在 GitHub Actions 页面手动运行 `Release` 工作流并输入 tag，例如 `v0.1.8`。工作流会覆盖同名 Release asset。
 
 工作流也监听 `master` 分支 push，用于让新仓库在 GitHub Actions 页面注册工作流；发布构建 job 只会在 tag push 或手动输入 tag 时运行。
 

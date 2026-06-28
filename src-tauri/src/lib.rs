@@ -60,10 +60,7 @@ pub async fn run_service_foreground() -> anyhow::Result<()> {
 
     match wait_for_shutdown_signal().await {
         Ok(()) => {
-            append_log(
-                &paths.logs.app_log,
-                "Vekai CLI service stopping",
-            )?;
+            append_log(&paths.logs.app_log, "Vekai CLI service stopping")?;
         }
         Err(error) => {
             append_log(
@@ -756,6 +753,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_bootstrap,
+            commands::get_snapshot,
             commands::save_config,
             commands::refresh_models,
             commands::start_servers,

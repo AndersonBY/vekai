@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="src-tauri/icons/vekai-app.svg" alt="Vekai logo" width="128" height="128">
+</p>
+
 # Vekai
 
 [English](README.md)

@@ -10,6 +10,7 @@
 | [AGENT_WORKFLOW.md](AGENT_WORKFLOW.md) | Codex 或其他智能体在本仓库工作的步骤、上下文获取方式和交付要求。 |
 | [QUALITY.md](QUALITY.md) | 测试、验证、质量门槛和常见风险清单。 |
 | [RELEASE.md](RELEASE.md) | Windows、macOS、Linux 打包、交付目录、运行时和模型交付说明。 |
+| [PERFORMANCE.md](PERFORMANCE.md) | 本机性能基线、CUDA/FP16 实验、Profiler 结论和加速路线。 |
 
 `docs/superpowers/` 是本地智能体规划历史目录，不作为 Git 提交内容。当前事实以本目录的顶层文档、README 和代码为准。
 

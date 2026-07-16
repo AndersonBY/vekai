@@ -13,9 +13,11 @@ use zip::ZipArchive;
 pub const RUNTIME_ARCHIVE_FILE_HINT: &str = "llama-b*-bin-<platform>.<zip|tar.gz>";
 pub const RUNTIME_ZIP_FILE_HINT: &str = "llama-b*-bin-win-vulkan-x64.zip";
 pub const RUNTIME_DIR_NAME: &str = "llama-bin-win-vulkan-x64";
+pub const WINDOWS_CUDA_RUNTIME_DIR_NAME: &str = "llama-bin-win-cuda-12.4-x64";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimePlatform {
+    WindowsCudaX64,
     WindowsVulkanX64,
     WindowsCpuArm64,
     UbuntuX64,
@@ -31,6 +33,7 @@ impl RuntimePlatform {
 
     pub fn runtime_dir_name(self) -> &'static str {
         match self {
+            Self::WindowsCudaX64 => WINDOWS_CUDA_RUNTIME_DIR_NAME,
             Self::WindowsVulkanX64 => "llama-bin-win-vulkan-x64",
             Self::WindowsCpuArm64 => "llama-bin-win-cpu-arm64",
             Self::UbuntuX64 => "llama-bin-ubuntu-x64",
@@ -41,7 +44,10 @@ impl RuntimePlatform {
     }
 
     pub fn server_file_name(self) -> &'static str {
-        if matches!(self, Self::WindowsVulkanX64 | Self::WindowsCpuArm64) {
+        if matches!(
+            self,
+            Self::WindowsCudaX64 | Self::WindowsVulkanX64 | Self::WindowsCpuArm64
+        ) {
             "llama-server.exe"
         } else {
             "llama-server"
@@ -50,6 +56,7 @@ impl RuntimePlatform {
 
     pub fn archive_hint(self) -> &'static str {
         match self {
+            Self::WindowsCudaX64 => "llama-b*-bin-win-cuda-12.4-x64.zip and cudart companion",
             Self::WindowsVulkanX64 => "llama-b*-bin-win-vulkan-x64.zip",
             Self::WindowsCpuArm64 => "llama-b*-bin-win-cpu-arm64.zip",
             Self::UbuntuX64 => "llama-b*-bin-ubuntu-x64.tar.gz",
@@ -62,6 +69,11 @@ impl RuntimePlatform {
     pub fn matches_asset_name(self, file_name: &str) -> bool {
         let lower = file_name.to_ascii_lowercase();
         match self {
+            Self::WindowsCudaX64 => {
+                lower.starts_with("llama-")
+                    && lower.ends_with("-bin-win-cuda-12.4-x64.zip")
+                    && !lower.starts_with("cudart-")
+            }
             Self::WindowsVulkanX64 => {
                 lower.starts_with("llama-")
                     && lower.ends_with("-bin-win-vulkan-x64.zip")
@@ -82,6 +94,13 @@ impl RuntimePlatform {
             Self::MacosArm64 => {
                 lower.starts_with("llama-") && lower.ends_with("-bin-macos-arm64.tar.gz")
             }
+        }
+    }
+
+    fn companion_archive_name(self) -> Option<&'static str> {
+        match self {
+            Self::WindowsCudaX64 => Some("cudart-llama-bin-win-cuda-12.4-x64.zip"),
+            _ => None,
         }
     }
 }
@@ -139,11 +158,19 @@ pub struct RuntimeMarker {
     #[serde(alias = "zip_name")]
     pub archive_name: String,
     pub sha256: String,
+    #[serde(default)]
+    pub archive_sizes: Vec<u64>,
 }
 
 impl RuntimeMarker {
     pub fn matches(&self, archive_name: &str, sha256: &str) -> bool {
         self.archive_name == archive_name && self.sha256.eq_ignore_ascii_case(sha256)
+    }
+
+    pub fn matches_metadata(&self, archive_name: &str, archive_sizes: &[u64]) -> bool {
+        self.archive_name == archive_name
+            && !self.archive_sizes.is_empty()
+            && self.archive_sizes == archive_sizes
     }
 }
 
@@ -185,6 +212,15 @@ pub fn ensure_runtime_from_downloads(
     runtime_root: &Path,
     download_dirs: &[PathBuf],
 ) -> anyhow::Result<RuntimeLayout> {
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    if find_runtime_archives(download_dirs, RuntimePlatform::WindowsCudaX64).is_ok() {
+        return ensure_runtime_from_downloads_for_platform(
+            runtime_root,
+            download_dirs,
+            RuntimePlatform::WindowsCudaX64,
+        );
+    }
+
     ensure_runtime_from_downloads_for_platform(
         runtime_root,
         download_dirs,
@@ -200,22 +236,55 @@ pub fn ensure_runtime_from_downloads_for_platform(
     fs::create_dir_all(runtime_root).context("failed to create runtime root")?;
 
     let layout = runtime_layout_for_platform(runtime_root, platform);
-    let runtime_archive = find_runtime_archive(download_dirs, platform)?;
-    let sha256 = sha256_file_hex(&runtime_archive)?;
+    let runtime_archives = find_runtime_archives(download_dirs, platform)?;
+    let archive_names = runtime_archives
+        .iter()
+        .map(|archive| {
+            archive
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| platform.archive_hint().to_string())
+        })
+        .collect::<Vec<_>>()
+        .join(";");
+    let archive_sizes = runtime_archives
+        .iter()
+        .map(|archive| {
+            archive
+                .metadata()
+                .with_context(|| format!("failed to inspect {}", archive.display()))
+                .map(|metadata| metadata.len())
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let existing_marker = if layout.server_exe.exists() && layout.marker_path.exists() {
+        read_marker(&layout.marker_path).ok()
+    } else {
+        None
+    };
+    if existing_marker
+        .as_ref()
+        .is_some_and(|marker| marker.matches_metadata(&archive_names, &archive_sizes))
+    {
+        return Ok(layout);
+    }
+
+    let archive_hashes = runtime_archives
+        .iter()
+        .map(|archive| sha256_file_hex(archive))
+        .collect::<anyhow::Result<Vec<_>>>()?
+        .join(";");
     let marker = RuntimeMarker {
-        archive_name: runtime_archive
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| platform.archive_hint().to_string()),
-        sha256: sha256.clone(),
+        archive_name: archive_names,
+        sha256: archive_hashes,
+        archive_sizes,
     };
 
-    if layout.server_exe.exists() && layout.marker_path.exists() {
-        if let Ok(existing_marker) = read_marker(&layout.marker_path) {
-            if existing_marker.matches(&marker.archive_name, &sha256) {
-                return Ok(layout);
-            }
-        }
+    if existing_marker
+        .as_ref()
+        .is_some_and(|existing| existing.matches(&marker.archive_name, &marker.sha256))
+    {
+        write_runtime_marker(&layout.runtime_dir, &marker)?;
+        return Ok(layout);
     }
 
     let temp_dir = runtime_root.join(format!(".tmp-{}", Utc::now().timestamp_millis()));
@@ -226,9 +295,11 @@ pub fn ensure_runtime_from_downloads_for_platform(
     fs::create_dir_all(&temp_dir)
         .with_context(|| format!("failed to create temp runtime dir {}", temp_dir.display()))?;
 
-    if let Err(error) = extract_runtime_archive(&runtime_archive, &temp_dir, &marker) {
-        let _ = fs::remove_dir_all(&temp_dir);
-        return Err(error);
+    for runtime_archive in &runtime_archives {
+        if let Err(error) = extract_runtime_archive(runtime_archive, &temp_dir, &marker) {
+            let _ = fs::remove_dir_all(&temp_dir);
+            return Err(error);
+        }
     }
 
     normalize_runtime_root(&temp_dir, platform.server_file_name())?;
@@ -237,7 +308,11 @@ pub fn ensure_runtime_from_downloads_for_platform(
         let _ = fs::remove_dir_all(&temp_dir);
         bail!(
             "runtime archive {} did not contain {}",
-            runtime_archive.display(),
+            runtime_archives
+                .iter()
+                .map(|archive| archive.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
             platform.server_file_name()
         );
     }
@@ -252,10 +327,10 @@ pub fn ensure_runtime_from_downloads_for_platform(
     Ok(layout)
 }
 
-fn find_runtime_archive(
+fn find_runtime_archives(
     download_dirs: &[PathBuf],
     platform: RuntimePlatform,
-) -> anyhow::Result<PathBuf> {
+) -> anyhow::Result<Vec<PathBuf>> {
     for dir in download_dirs {
         if !dir.is_dir() {
             continue;
@@ -273,7 +348,14 @@ fn find_runtime_archive(
             .collect::<Vec<_>>();
         candidates.sort();
         if let Some(candidate) = candidates.pop() {
-            return Ok(candidate);
+            if let Some(companion_name) = platform.companion_archive_name() {
+                let companion = dir.join(companion_name);
+                if companion.is_file() {
+                    return Ok(vec![candidate, companion]);
+                }
+                continue;
+            }
+            return Ok(vec![candidate]);
         }
     }
 
@@ -566,6 +648,22 @@ mod tests {
     }
 
     #[test]
+    fn runtime_layout_separates_cuda_from_vulkan() {
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let runtime_root = temp_dir.path().join("runtimes");
+        let layout = runtime_layout_for_platform(&runtime_root, RuntimePlatform::WindowsCudaX64);
+
+        assert_eq!(
+            layout.runtime_dir,
+            runtime_root.join(WINDOWS_CUDA_RUNTIME_DIR_NAME)
+        );
+        assert_eq!(
+            layout.server_exe,
+            layout.runtime_dir.join("llama-server.exe")
+        );
+    }
+
+    #[test]
     fn runtime_layout_uses_unix_server_name_for_linux_targets() {
         let temp_dir = tempfile::tempdir().expect("temp dir should be created");
         let runtime_root = temp_dir.path().join("runtimes");
@@ -581,6 +679,12 @@ mod tests {
 
     #[test]
     fn runtime_asset_matching_is_platform_specific() {
+        assert!(RuntimePlatform::WindowsCudaX64
+            .matches_asset_name("llama-b9999-bin-win-cuda-12.4-x64.zip"));
+        assert!(!RuntimePlatform::WindowsCudaX64
+            .matches_asset_name("cudart-llama-bin-win-cuda-12.4-x64.zip"));
+        assert!(!RuntimePlatform::WindowsCudaX64
+            .matches_asset_name("llama-b9999-bin-win-cuda-13.3-x64.zip"));
         assert!(RuntimePlatform::WindowsVulkanX64
             .matches_asset_name("llama-b9999-bin-win-vulkan-x64.zip"));
         assert!(
@@ -603,11 +707,20 @@ mod tests {
         let marker = RuntimeMarker {
             archive_name: zip_name.to_string(),
             sha256: "ABCDEF123456".to_string(),
+            archive_sizes: Vec::new(),
         };
 
         assert!(marker.matches(zip_name, "abcdef123456"));
         assert!(!marker.matches("other.zip", "abcdef123456"));
         assert!(!marker.matches(zip_name, "deadbeef"));
+        assert!(!marker.matches_metadata(zip_name, &[123]));
+
+        let sized_marker = RuntimeMarker {
+            archive_sizes: vec![123],
+            ..marker
+        };
+        assert!(sized_marker.matches_metadata(zip_name, &[123]));
+        assert!(!sized_marker.matches_metadata(zip_name, &[456]));
     }
 
     #[test]
@@ -697,6 +810,74 @@ mod tests {
             marker.sha256,
             sha256_file_hex(&zip_path).expect("zip hash should be computed")
         );
+    }
+
+    #[test]
+    fn ensure_cuda_runtime_extracts_main_and_companion_archives() {
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let downloads_dir = temp_dir.path().join("downloads");
+        fs::create_dir_all(&downloads_dir).expect("downloads dir should be created");
+        let main_path = downloads_dir.join("llama-b9999-bin-win-cuda-12.4-x64.zip");
+        let companion_path = downloads_dir.join("cudart-llama-bin-win-cuda-12.4-x64.zip");
+        write_test_runtime_zip(&main_path);
+        write_test_cuda_companion_zip(&companion_path);
+
+        let layout = ensure_runtime_from_downloads_for_platform(
+            temp_dir.path().join("runtimes").as_path(),
+            &[downloads_dir],
+            RuntimePlatform::WindowsCudaX64,
+        )
+        .expect("CUDA runtime should be ensured");
+
+        assert!(layout.server_exe.exists());
+        assert!(layout.runtime_dir.join("cudart64_12.dll").exists());
+        let marker = read_marker(&layout.marker_path).expect("runtime marker should parse");
+        assert!(marker
+            .archive_name
+            .contains("llama-b9999-bin-win-cuda-12.4-x64.zip"));
+        assert!(marker
+            .archive_name
+            .contains("cudart-llama-bin-win-cuda-12.4-x64.zip"));
+    }
+
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    #[test]
+    fn automatic_windows_runtime_prefers_complete_cuda_assets() {
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let downloads_dir = temp_dir.path().join("downloads");
+        fs::create_dir_all(&downloads_dir).expect("downloads dir should be created");
+        write_test_runtime_zip(&downloads_dir.join("llama-b9999-bin-win-vulkan-x64.zip"));
+        write_test_runtime_zip(&downloads_dir.join("llama-b9999-bin-win-cuda-12.4-x64.zip"));
+        write_test_cuda_companion_zip(
+            &downloads_dir.join("cudart-llama-bin-win-cuda-12.4-x64.zip"),
+        );
+
+        let layout = ensure_runtime_from_downloads(
+            temp_dir.path().join("runtimes").as_path(),
+            &[downloads_dir],
+        )
+        .expect("automatic runtime selection should succeed");
+
+        assert!(layout.runtime_dir.ends_with(WINDOWS_CUDA_RUNTIME_DIR_NAME));
+        assert!(layout.runtime_dir.join("cudart64_12.dll").exists());
+    }
+
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    #[test]
+    fn automatic_windows_runtime_falls_back_when_cuda_companion_is_missing() {
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let downloads_dir = temp_dir.path().join("downloads");
+        fs::create_dir_all(&downloads_dir).expect("downloads dir should be created");
+        write_test_runtime_zip(&downloads_dir.join("llama-b9999-bin-win-vulkan-x64.zip"));
+        write_test_runtime_zip(&downloads_dir.join("llama-b9999-bin-win-cuda-12.4-x64.zip"));
+
+        let layout = ensure_runtime_from_downloads(
+            temp_dir.path().join("runtimes").as_path(),
+            &[downloads_dir],
+        )
+        .expect("Vulkan fallback should succeed");
+
+        assert!(layout.runtime_dir.ends_with(RUNTIME_DIR_NAME));
     }
 
     #[test]
@@ -809,6 +990,17 @@ mod tests {
             .expect("server entry should start");
         zip.write_all(b"fake server")
             .expect("server entry should be written");
+        zip.finish().expect("test zip should finish");
+    }
+
+    fn write_test_cuda_companion_zip(path: &Path) {
+        let file = fs::File::create(path).expect("test zip should be created");
+        let mut zip = zip::ZipWriter::new(file);
+        let options: zip::write::SimpleFileOptions = zip::write::FileOptions::default();
+        zip.start_file("cudart64_12.dll", options)
+            .expect("CUDA runtime entry should start");
+        zip.write_all(b"fake CUDA runtime")
+            .expect("CUDA runtime entry should be written");
         zip.finish().expect("test zip should finish");
     }
 

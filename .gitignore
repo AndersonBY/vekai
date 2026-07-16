@@ -18,5 +18,7 @@ vite.config.js
 vite.config.d.ts
 *.log
 *.tmp
+__pycache__/
+*.py[cod]
 .DS_Store
 Thumbs.db

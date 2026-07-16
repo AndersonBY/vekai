@@ -3,7 +3,11 @@
     "githubRepo": "ggml-org/llama.cpp",
     "platforms": {
       "windows-x64": {
-        "assetPattern": "^llama-b[0-9]+-bin-win-vulkan-x64\\.zip$"
+        "assetPattern": "^llama-b[0-9]+-bin-win-vulkan-x64\\.zip$",
+        "cudaAssetPatterns": [
+          "^llama-b[0-9]+-bin-win-cuda-12\\.4-x64\\.zip$",
+          "^cudart-llama-bin-win-cuda-12\\.4-x64\\.zip$"
+        ]
       },
       "windows-arm64": {
         "assetPattern": "^llama-b[0-9]+-bin-win-cpu-arm64\\.zip$"

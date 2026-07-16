@@ -44,6 +44,12 @@ powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1 -SkipRuntim
 powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1 -RuntimePlatform ubuntu-arm64 -SkipModels
 ```
 
+NVIDIA Windows x64 机器可安装 CUDA 12.4 加速 runtime；下载完成后重启服务，Vekai 会自动优先使用完整的 CUDA 资产，缺失时仍回退安装包内置的 Vulkan runtime：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1 -WindowsBackend cuda -SkipModels
+```
+
 ## 默认地址
 
 | 服务 | 默认协议 | 默认端口 | 默认接口 |
@@ -222,9 +228,9 @@ npm run tauri:build
 
 应用会启动本机 HTTP 服务。只在本机使用时保持监听地址为 `127.0.0.1`；需要局域网访问时再改成 `0.0.0.0`，并只在可信网络中放行。
 
-**Vulkan 或 GPU 相关错误**
+**CUDA、Vulkan 或 GPU 相关错误**
 
-确认显卡驱动支持 Vulkan，并尝试把 GPU 层数改为 `0` 使用 CPU 跑通流程，再按机器能力调回 `auto`、`all` 或具体层数。
+CUDA 加速只用于 NVIDIA Windows x64，并要求较新的 NVIDIA 驱动。CUDA 主包或 companion runtime 不完整时应用会自动使用 Vulkan；仍有问题时，把 GPU 层数改为 `0` 验证 CPU 路径，再按机器能力调回 `auto`、`all` 或具体层数。
 
 **找不到新日志**
 

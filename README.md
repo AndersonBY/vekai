@@ -44,6 +44,12 @@ To download a runtime for another platform:
 powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1 -RuntimePlatform ubuntu-arm64 -SkipModels
 ```
 
+On NVIDIA Windows x64 machines, install the CUDA 12.4 accelerated runtime below and restart the services. Vekai prefers complete CUDA assets automatically and falls back to the bundled Vulkan runtime when they are absent:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1 -WindowsBackend cuda -SkipModels
+```
+
 ## Default URLs
 
 | Service | Default protocol | Default port | Default endpoint |
@@ -222,9 +228,9 @@ The first service startup extracts the bundled or local `downloads\llama-b*-bin-
 
 The app starts local HTTP services. Keep the host as `127.0.0.1` for local-only use. Use `0.0.0.0` only when LAN access is required and the network is trusted.
 
-**Vulkan or GPU errors**
+**CUDA, Vulkan, or GPU errors**
 
-Make sure the GPU driver supports Vulkan. To isolate GPU issues, set GPU layers to `0` and verify CPU execution first, then switch back to `auto`, `all`, or a specific layer count.
+CUDA acceleration is limited to NVIDIA Windows x64 and requires a recent NVIDIA driver. Vekai falls back to Vulkan when either the CUDA main archive or its companion runtime is absent. To isolate remaining GPU issues, set GPU layers to `0`, verify CPU execution, then switch back to `auto`, `all`, or a specific layer count.
 
 **New logs are missing**
 

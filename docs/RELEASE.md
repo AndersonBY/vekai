@@ -64,13 +64,13 @@ Tauri 打包会把该目录映射到安装包资源目录的 `downloads/`。应�
 %LOCALAPPDATA%\Vekai\runtimes
 ```
 
-运行时 marker 使用 archive 文件名和 SHA256 判断是否需要重新解压。更新 runtime 不要求改代码，但每个平台安装包必须包含对应平台的 `downloads\llama-b*-bin-<platform>.*`。本机数据目录和 exe 同级 `downloads\` 仍可用于调试或临时覆盖安装包内置 runtime。
+运行时 marker 使用 archive 文件名、大小和 SHA256 判断是否需要重新解压。文件名与大小未变化时直接复用，避免每次启动重复扫描大 archive；首次安装或元数据变化时才计算 SHA256。更新 runtime 不要求改代码，但每个平台安装包必须包含对应平台的 `downloads\llama-b*-bin-<platform>.*`。本机数据目录和 exe 同级 `downloads\` 仍可用于调试或临时覆盖安装包内置 runtime。
 
 支持的 runtime 平台：
 
 | 平台 | 下载脚本参数 | llama.cpp asset |
 | --- | --- | --- |
-| Windows x64 | `windows-x64` | `llama-b*-bin-win-vulkan-x64.zip` |
+| Windows x64 | `windows-x64` | 默认 `llama-b*-bin-win-vulkan-x64.zip`；`-WindowsBackend cuda` 下载 CUDA 12.4 主包和 cudart companion |
 | Windows ARM64 | `windows-arm64` | `llama-b*-bin-win-cpu-arm64.zip` |
 | Ubuntu/Linux x64 | `ubuntu-x64` | `llama-b*-bin-ubuntu-x64.tar.gz` |
 | Ubuntu/Linux ARM64 | `ubuntu-arm64` | `llama-b*-bin-ubuntu-arm64.tar.gz` |
@@ -176,6 +176,8 @@ Linux `.deb` 包会额外包含服务模式说明文件：
 **安装包是否包含 llama.cpp 运行时？**
 
 包含。每个平台安装包会内置对应平台的 llama.cpp runtime archive，首次启动服务时解压到 `%LOCALAPPDATA%\Vekai\runtimes`。本机数据目录或 exe 同级 `downloads\` 中的匹配 archive 可用于临时覆盖。
+
+Windows x64 通用安装包默认内置 Vulkan，避免绑定 NVIDIA。NVIDIA 交付可执行 `scripts\prepare-bundled-runtime.ps1 -WindowsBackend cuda` 构建 CUDA 专用安装包；CUDA 主包和 cudart companion 必须同时存在。也可以在安装后运行 `scripts\download-assets.ps1 -WindowsBackend cuda -SkipModels`，应用会自动优先使用 CUDA。
 
 **安装包是否必须包含模型？**
 

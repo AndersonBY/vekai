@@ -95,6 +95,8 @@ Rust app state and config
 
 Embedding 和 Rerank 请求不复用生成式 KV 状态，因此启动参数固定包含 `--cache-ram 0`，避免 llama.cpp 的 8 GiB prompt cache 管理开销。运行时日志使用 `--log-verbosity 1`，只保留错误级输出；每个服务日志在启动前检查，超过 16 MiB 时截断并写入说明，防止高频推理长期写盘拖慢服务。
 
+Windows x64 安装包默认内置通用 Vulkan runtime。若下载目录中同时存在 `llama-b*-bin-win-cuda-12.4-x64.zip` 和 `cudart-llama-bin-win-cuda-12.4-x64.zip`，运行时解析会优先解压并使用 CUDA；只有一个 CUDA archive 时视为不完整并回退 Vulkan。CUDA 与 Vulkan 分别解压到独立目录。Marker 记录所有组成 archive 的文件名、大小和 SHA256；文件名与大小未变化时走快速复用路径，首次安装或元数据变化时才重新计算 SHA256。
+
 ## 运行模式
 
 无子命令启动时进入 Tauri GUI。CLI 子命令包括：

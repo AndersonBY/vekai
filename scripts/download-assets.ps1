@@ -5,6 +5,8 @@ param(
     [string]$ModelsDir = '',
     [ValidateSet('auto', 'windows-x64', 'windows-arm64', 'ubuntu-x64', 'ubuntu-arm64', 'macos-x64', 'macos-arm64')]
     [string]$RuntimePlatform = 'auto',
+    [ValidateSet('default', 'vulkan', 'cuda')]
+    [string]$WindowsBackend = 'default',
     [switch]$SkipRuntime,
     [switch]$SkipModels,
     [switch]$Force,
@@ -199,22 +201,40 @@ if (-not $SkipRuntime) {
         throw "No runtime asset configuration for platform '$resolvedRuntimePlatform'."
     }
 
-    $runtime = Get-LatestRuntimeAsset -Repo $assets.runtime.githubRepo -Pattern ([string]$runtimePlatformConfig.assetPattern)
-    $runtimePath = Join-Path $DownloadDir $runtime.Name
-    Write-Step "Runtime platform: $resolvedRuntimePlatform"
-    Write-Step "Runtime: $($runtime.Name) from $($runtime.Tag)"
-
-    if (-not $Force -and (Test-Asset -Path $runtimePath -ExpectedSize $runtime.Size -ExpectedSha256 $null)) {
-        Write-Step "Runtime already present: $runtimePath"
+    if ($WindowsBackend -eq 'cuda' -and $resolvedRuntimePlatform -ne 'windows-x64') {
+        throw "WindowsBackend 'cuda' is only supported for windows-x64."
+    }
+    $runtimePatterns = if ($resolvedRuntimePlatform -eq 'windows-x64' -and $WindowsBackend -eq 'cuda') {
+        @($runtimePlatformConfig.cudaAssetPatterns | ForEach-Object { [string]$_ })
     } else {
-        if ($Force -and (Test-Path -LiteralPath $runtimePath)) {
-            Remove-Item -LiteralPath $runtimePath -Force
+        @([string]$runtimePlatformConfig.assetPattern)
+    }
+    $invalidRuntimePatterns = @(
+        $runtimePatterns | Where-Object { [string]::IsNullOrWhiteSpace($_) }
+    )
+    if ($runtimePatterns.Count -eq 0 -or $invalidRuntimePatterns.Count -gt 0) {
+        throw "No runtime asset patterns configured for platform '$resolvedRuntimePlatform' and backend '$WindowsBackend'."
+    }
+
+    Write-Step "Runtime platform: $resolvedRuntimePlatform"
+    Write-Step "Runtime backend: $WindowsBackend"
+    foreach ($runtimePattern in $runtimePatterns) {
+        $runtime = Get-LatestRuntimeAsset -Repo $assets.runtime.githubRepo -Pattern $runtimePattern
+        $runtimePath = Join-Path $DownloadDir $runtime.Name
+        Write-Step "Runtime: $($runtime.Name) from $($runtime.Tag)"
+
+        if (-not $Force -and (Test-Asset -Path $runtimePath -ExpectedSize $runtime.Size -ExpectedSha256 $null)) {
+            Write-Step "Runtime already present: $runtimePath"
+        } else {
+            if ($Force -and (Test-Path -LiteralPath $runtimePath)) {
+                Remove-Item -LiteralPath $runtimePath -Force
+            }
+            Invoke-ResumableDownload -Url $runtime.Url -OutFile $runtimePath
+            if (-not (Test-Asset -Path $runtimePath -ExpectedSize $runtime.Size -ExpectedSha256 $null)) {
+                throw "Runtime download verification failed: $runtimePath"
+            }
+            Write-Step "Runtime downloaded: $runtimePath"
         }
-        Invoke-ResumableDownload -Url $runtime.Url -OutFile $runtimePath
-        if (-not (Test-Asset -Path $runtimePath -ExpectedSize $runtime.Size -ExpectedSha256 $null)) {
-            throw "Runtime download verification failed: $runtimePath"
-        }
-        Write-Step "Runtime downloaded: $runtimePath"
     }
 }
 

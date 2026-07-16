@@ -13,10 +13,11 @@ powershell -ExecutionPolicy Bypass -File scripts\prepare-bundled-runtime.ps1
 再打包：
 
 ```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build-fastpath.ps1
 npm run tauri:build
 ```
 
-该命令会先执行前端构建，再构建 Tauri release 产物。
+`build-fastpath.ps1` 仅支持 Windows x64；其他平台直接运行 `npm run tauri:build`。Tauri 命令会先执行前端构建，再构建 release 产物。
 
 ## 主要产物
 
@@ -95,11 +96,24 @@ models\Qwen3-Embedding-0.6B-Q8_0.gguf
 
 不要把代码改成硬编码某个开发机路径。
 
+## Windows Embedding 快路径
+
+Windows x64 安装包包含约 5 MB 的 Rust sidecar 和 562 KiB ONNX 瘦图，不包含 FP16 外部权重或 GPU DLL。NVIDIA 用户在源码/交付脚本目录运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\download-fastpath.ps1
+```
+
+脚本把校验后的资产安装到 `%LOCALAPPDATA%\Vekai\fastpath`，并在所有文件成功后最后写 `manifest.json`。wheel 只作为下载容器，默认在成功后删除；安装目录不包含 Python、PyTorch 或 TensorRT。Vekai 仅在选择 `Qwen3-Embedding-0.6B*.gguf` 时自动启用，其他模型和其他平台继续使用 llama.cpp。
+
+Windows x64 release workflow 必须先运行 `scripts\build-fastpath.ps1`。sidecar exe 是生成物，不提交 Git；FP16 权重和 CUDA DLL 也不进入 Git 或安装包。
+
 ## 打包前检查
 
 ```powershell
 git diff --check
 powershell -ExecutionPolicy Bypass -File scripts\prepare-bundled-runtime.ps1
+powershell -ExecutionPolicy Bypass -File scripts\build-fastpath.ps1
 npm run verify:icons
 npm run build
 cargo test --manifest-path src-tauri/Cargo.toml
@@ -166,6 +180,8 @@ Linux `.deb` 包会额外包含服务模式说明文件：
 - 日志目录为 `%LOCALAPPDATA%\Vekai\logs`。
 - 默认 Rerank 地址可访问 `/v1/rerank`。
 - 默认 Embedding 地址可访问 `/v1/embeddings`。
+- 安装 fastpath 资产并选择 Qwen3-Embedding-0.6B 后，Embedding `/health` 返回 `backend: ort_cuda`。
+- 强制结束 sidecar 后，8013 自动由 llama.cpp 恢复并继续返回 1024 维向量。
 
 ## 常见交付问题
 

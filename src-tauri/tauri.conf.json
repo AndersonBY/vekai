@@ -30,6 +30,7 @@
     "targets": ["nsis"],
     "resources": {
       "../bundle-resources/downloads/": "downloads/",
+      "resources/fastpath/": "fastpath/",
       "resources/linux/": "linux-service/"
     },
     "linux": {

@@ -1,6 +1,6 @@
 # 架构说明
 
-Vekai 是一个桌面 GUI 与 CLI 服务双模式应用。它的核心职责是管理本机 `llama-server`/`llama-server.exe` 进程，并对外提供 Embedding 和 Rerank HTTP 服务。
+Vekai 是一个桌面 GUI 与 CLI 服务双模式应用。它管理本机 `llama-server`/`llama-server.exe`，并在 Windows x64 NVIDIA 环境中可选管理 ONNX Runtime CUDA Embedding sidecar，对外保持统一的 Embedding 和 Rerank HTTP 服务。
 
 ## 系统边界
 
@@ -17,7 +17,7 @@ Rust app state and config
         +--> protocol proxy
                  |
                  v
-          llama-server
+          llama-server or embedding fastpath sidecar
 ```
 
 前端只负责配置、状态展示、测试按钮和用户交互。服务启动、进程管理、配置持久化、日志、安装包内置或本机 runtime archive 查找/解压和协议转换都由 Rust 侧负责。
@@ -36,10 +36,14 @@ Rust app state and config
 | `src-tauri/src/llama_args.rs` | 根据配置和模型路径生成 `llama-server` 参数。 |
 | `src-tauri/src/cli.rs` | 解析 CLI 子命令并生成 Linux systemd unit 内容。 |
 | `src-tauri/src/process.rs` | 子进程启动、健康检查、停止、崩溃重启和日志汇总。 |
+| `src-tauri/src/fastpath.rs` | Windows x64 Embedding 快路径资产发现、manifest 快速校验和运行布局。 |
+| `src-fastpath/` | 单 ORT CUDA session、动态 padding、微批和 OpenAI Embeddings HTTP sidecar。 |
 | `src-tauri/src/runtime.rs` | 安装包内置或已下载 llama.cpp runtime archive 的查找、哈希、解压和运行时布局。 |
 | `scripts/assets.json` | 默认 runtime/model 下载配置、模型大小和 SHA256。 |
 | `scripts/prepare-bundled-runtime.ps1` | 打包前准备脚本，下载当前平台匹配的 latest llama.cpp runtime 到安装包资源暂存目录。 |
 | `scripts/download-assets.ps1` | 资产下载脚本，可下载当前平台 runtime 和默认 GGUF 模型；用户通常只需用它下载模型。 |
+| `scripts/download-fastpath.ps1` | 下载并校验 FP16 权重和固定版本的 ORT/CUDA/cuBLAS/cuFFT/cuDNN DLL。 |
+| `scripts/build-fastpath.ps1` | Windows x64 打包前构建 sidecar，并复制到 Tauri fastpath resource。 |
 | `src-tauri/src/models.rs` | `.gguf` 模型发现、默认模型选择和展示数据。 |
 | `src-tauri/src/protocol_adapter.rs` | 各协议到 llama.cpp 原生 JSON 的请求/响应转换。 |
 | `src-tauri/src/protocol_proxy.rs` | 非原生协议的本地 HTTP 代理。 |
@@ -116,24 +120,24 @@ vekai uninstall-service
 1. 读取当前配置。
 2. 确认服务已启用且模型路径存在。
 3. 确保安装包内置或本机下载的 llama.cpp 运行时 archive 已解压。
-4. 根据协议决定是否需要本地代理。
-5. 按配置生成 `llama-server` 参数并启动进程。
+4. Embedding 选择 Qwen3-Embedding-0.6B 时检查完整 fastpath manifest；不支持或不完整时继续 llama.cpp。
+5. 根据协议决定是否需要本地代理，并启动 sidecar 或按配置生成参数后启动 `llama-server`。
 6. 轮询 `/health`。
 7. 更新状态和最近日志。
 
 Rerank 和 Embedding 同时启用时不能使用同一个端口。
-Rerank 与 Embedding 分别由独立的 `llama-server` 进程承载；同一个服务内的推理并发由 llama.cpp `--parallel` slot 决定，非原生协议代理只负责并发转发和协议转换。
+Rerank 使用独立 `llama-server`。Embedding 默认使用独立 `llama-server`；满足 Windows x64、模型名和完整资产条件时改用 sidecar。sidecar 使用单 ORT CUDA session、按 batch 最长文本动态 padding、最多 64 条分块和 750 微秒并发微批。sidecar 启动失败、健康超时或运行期退出时，supervisor 在同一端口自动切换到 llama.cpp。非原生协议仍复用同一个本地协议代理。
 
 ## 协议模型
 
-原生协议直接暴露 llama.cpp 的 HTTP 服务：
+原生协议直接暴露当前后端的 HTTP 服务：
 
 | 服务 | 原生协议 | 默认端口 | 路径 |
 | --- | --- | ---: | --- |
 | Rerank | `llama_rerank` | `8012` | `/v1/rerank` |
 | Embedding | `openai_embeddings` | `8013` | `/v1/embeddings` |
 
-非原生协议使用本地协议代理。代理监听用户配置的公开端口，底层 `llama-server` 运行在自动分配的内部 loopback 端口。
+非原生协议使用本地协议代理。代理监听用户配置的公开端口，底层 llama.cpp 或 fastpath sidecar 运行在自动分配的内部 loopback 端口。
 
 Rerank 协议：
 
@@ -166,6 +170,7 @@ Embedding 协议：
 | 本地数据根目录 | `%LOCALAPPDATA%\Vekai\` |
 | 日志目录 | `%LOCALAPPDATA%\Vekai\logs` |
 | 运行时解压目录 | `%LOCALAPPDATA%\Vekai\runtimes` |
+| Embedding 快路径模型、runtime 和 manifest | `%LOCALAPPDATA%\Vekai\fastpath` |
 | 本机运行时下载目录 | `%LOCALAPPDATA%\Vekai\downloads` |
 | 绿色版运行时下载目录 | exe 同级 `downloads\` |
 | 安装包内置运行时目录 | Tauri resource 目录下的 `downloads/` |

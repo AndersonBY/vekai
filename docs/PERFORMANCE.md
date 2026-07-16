@@ -28,20 +28,34 @@ Embedding 同模型、同参数、同请求对比：
 
 Rerank 的 CUDA 收益较小：1/8/32 条约快 12%–21%，64 条复测为 CUDA 137.8 ms、Vulkan 138.8 ms，基本持平。
 
-## FP16 快路径上限
+## 生产 ORT CUDA 快路径
 
-Hugging Face FP16 encoder 使用 SDPA、last-token pooling 和 L2 normalize：
+正式 sidecar 使用公开 `onnx-community/Qwen3-Embedding-0.6B-ONNX` FP16 权重、last-token pooling 和 L2 normalize。瘦图只保留 `input_ids`、`attention_mask` 和 FP32 `embeddings`，权重继续作为外部数据文件。相对临时参考图的逐向量结果：
 
-| 条数 | PyTorch eager | `torch.compile` + Triton |
+- 平均余弦相似度 `0.9999940`
+- 最小余弦相似度 `0.9999892`
+- 最大绝对误差 `0.0005550`
+- 所有值有限
+
+固定 32 token、直接 ORT CUDA P50：
+
+| 条数 | 普通 CUDA | CUDA Graph |
 | ---: | ---: | ---: |
-| 1 | 约 66–96 ms | 8.3 ms |
-| 8 | 约 54–98 ms | 11.3 ms |
-| 32 | 54.3 ms | 41.8 ms |
-| 64 | 101.1 ms | 80.3 ms |
+| 1 | 12.9 ms | 12.2 ms |
+| 8 | 16.0 ms | 15.9 ms |
+| 32 | 42.2 ms | 43.5 ms |
+| 64 | 82.1 ms | 83.6 ms |
 
-固定 shape CUDA Graph 的 64 条结果为 92.3 ms，比 eager 快约 13%；Inductor/Triton 自动融合后进一步降到 80.3 ms。Q8 llama.cpp 与 FP16 的 64 个向量逐条比较，余弦相似度最小 0.998890、平均 0.999251。
+CUDA Graph 在 32/64 条时没有收益，还要求固定地址 I/O，并使长文本需要第二个 session。最终生产实现因此使用一个普通 ORT CUDA session，并只 padding 到当前微批最长文本。短文本通过真实 HTTP、丢弃响应体的 `curl.exe` P50 为：
 
-`torch.compile` 首次为不同 shape 生成内核需要数分钟，因此不能在桌面应用首次请求时现场编译。正式快路径必须使用离线构建并缓存的固定 bucket engine。
+| 条数 | sidecar HTTP P50 |
+| ---: | ---: |
+| 1 | 23.2 ms |
+| 8 | 31.9 ms |
+| 32 | 52.6 ms |
+| 64 | 63.0 ms |
+
+这些 HTTP 数字包含 Rust tokenizer、750 微秒微批窗口、GPU 推理、FP32 JSON 序列化和 loopback 传输。单 session release 热启动约 `3.2 s`，本机显存增量约 `2188 MiB`；与 Rerank llama CUDA 同时启动时总增量约 `2607 MiB`。强制终止 sidecar 后，Embedding 在约 `2.50 s` 内自动切到 llama CUDA，同端口请求继续成功。
 
 ## Profiler 结论
 
@@ -52,7 +66,7 @@ Nsight Systems 对 64 条 eager FP16 热区采样：
 - 单次 forward 有 1741 次 kernel launch。
 - pooling 和 normalize 只占极小比例。
 
-因此不应先手写 pooling、normalize 或矩阵乘算子。剩余机会主要是跨层 elementwise、RMSNorm、激活和 launch 融合；Triton 已证明自动融合有效。只有在 TensorRT/ONNX 图融合后 profiler 仍显示某个未覆盖算子占比超过约 20% 时，才值得维护自定义 CUDA 算子。
+因此不写自定义 GEMM、pooling 或 normalize 算子。Tensor Core GEMM 是主耗时，pooling/normalize 可忽略；自维护算子无法合理超过 cuBLAS 的 Tensor Core 路径，反而扩大驱动、架构和精度维护面。
 
 ## 已否定方案
 
@@ -60,12 +74,13 @@ Nsight Systems 对 64 条 eager FP16 热区采样：
 - 本地 Q4_K_M GGUF：32/64 条约 328/480 ms，慢于紧邻 Q8 对照的 302/413 ms。
 - 强制 Flash Attention、`--no-host`、高优先级和高 polling 组合：没有稳定优于默认 CUDA 参数。
 - 直接把 Python/PyTorch 打进安装包：启动、依赖体积和跨平台交付成本不符合当前产品边界。
+- TensorRT 修复 FP32 LayerNorm 后 batch 32 为 `42.2 ms`，没有快于 ORT；首次加载约 `61.9 s`，engine `1.20 GB`，builder DLL `1.82 GB`，不进入产品。
+- TensorRT 未启用 FP32 LayerNorm 时 batch 32 出现非有限值，不能以错误精度换速度。
+- Candle CUDA 需要本机 `nvcc` 和 MSVC C++ toolchain，交付面明显大于动态加载 ORT DLL。
+- CUDA Graph：固定 32 token 的 32/64 batch 略慢于普通 CUDA，双 session 显存约 `4.3 GiB`，已从生产实现移除。
 
-## 下一阶段
+## 资产和回退
 
-生产级极限路径应按以下顺序推进：
+`scripts/download-fastpath.ps1` 固定并校验 ONNX Runtime `1.23.0`、CUDA runtime `12.1.105`、cuBLAS `12.1.3.1`、cuFFT `11.0.2.54` 和 cuDNN `9.1.0.70`。只抽取进程实际需要的 10 个 DLL，不安装 Python/PyTorch。应用启动只校验 manifest 常量和大文件大小，并哈希 562 KiB 瘦图，避免每次启动扫描约 2.4 GB 资产。
 
-1. 导出 Qwen3 Embedding FP16 ONNX，验证 ONNX Runtime CUDA 和 TensorRT 固定 batch/sequence bucket。
-2. 预构建常用 batch 8/32/64 及 sequence 32/64/128/256/512 的 engine，禁止首次请求在线编译。
-3. Rust HTTP 层按请求规模路由：小请求继续 llama.cpp，大批量进入 fused encoder；非 NVIDIA 和 engine 不可用时自动回退。
-4. 除逐向量余弦外，增加真实检索集的 Recall@K/NDCG 回归，再决定默认阈值。
+快路径仅在 Windows x64、选择 Qwen3-Embedding-0.6B GGUF、manifest 完整且 sidecar 资源存在时启用。任何条件不满足都直接使用 llama.cpp；sidecar 启动失败、健康超时或运行期退出也会自动回退。

@@ -150,6 +150,11 @@ jobs:
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --target ${{ matrix.target }}
 
+      - name: Build Windows embedding fast path sidecar
+        if: matrix.name == 'windows-x64'
+        shell: pwsh
+        run: ./scripts/build-fastpath.ps1
+
       - name: Prepare bundled llama.cpp runtime
         shell: pwsh
         env:

@@ -1,4 +1,5 @@
 use crate::config::AppConfig;
+use crate::fastpath::FastPathLayout;
 use crate::llama_args::build_service_llama_server_args_for_endpoint;
 use crate::logging::{append_log, prepare_server_log, LogPaths};
 use crate::protocol_proxy::{
@@ -52,11 +53,31 @@ type ChildGeneration = u64;
 struct ManagedChild {
     child: Child,
     generation: ChildGeneration,
+    backend: ServiceBackend,
     proxy: Option<ProtocolProxyHandle>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ServiceBackend {
+    Llama,
+    EmbeddingFastPath,
+}
+
+impl ServiceBackend {
+    fn process_name(self) -> &'static str {
+        match self {
+            Self::Llama => "llama-server.exe",
+            Self::EmbeddingFastPath => "vekai-embedding-fastpath.exe",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 struct ServiceLaunch {
+    backend: ServiceBackend,
+    program: PathBuf,
+    current_dir: PathBuf,
+    path_prefix: Option<PathBuf>,
     args: Vec<String>,
     health_url: String,
     ports: Vec<LaunchPort>,
@@ -76,6 +97,7 @@ struct RestartContext {
     model_path: PathBuf,
     state: SharedAppState,
     logs: LogPaths,
+    fastpath: Option<FastPathLayout>,
 }
 
 #[derive(Debug, Default)]
@@ -140,12 +162,26 @@ impl ProcessManager {
         state: SharedAppState,
         logs: LogPaths,
     ) -> anyhow::Result<()> {
+        self.start_with_fastpath(config, runtime, model_path, state, logs, None)
+            .await
+    }
+
+    pub async fn start_with_fastpath(
+        &self,
+        config: AppConfig,
+        runtime: RuntimeLayout,
+        model_path: PathBuf,
+        state: SharedAppState,
+        logs: LogPaths,
+        fastpath: Option<FastPathLayout>,
+    ) -> anyhow::Result<()> {
         let context = RestartContext {
             config,
             runtime,
             model_path,
             state,
             logs,
+            fastpath,
         };
 
         start_with_context(self.supervisor(), context, StartReason::Manual).await
@@ -205,17 +241,32 @@ async fn start_with_context(
     let mut next_reason = reason;
 
     loop {
+        let attempted_context = next_context.clone();
         let startup_exit =
             match start_with_context_attempt(&supervisor, next_context, next_reason).await? {
                 StartAttemptOutcome::Finished => return Ok(()),
                 StartAttemptOutcome::StartupExited {
+                    backend,
                     state,
                     logs,
                     message,
-                } => (state, logs, message),
+                } => (backend, state, logs, message),
             };
 
-        let (state, logs, message) = startup_exit;
+        let (backend, state, logs, message) = startup_exit;
+        if backend == ServiceBackend::EmbeddingFastPath {
+            let fallback_message = service_message(
+                supervisor.kind,
+                &format!("Embedding fast path unavailable; falling back to llama.cpp: {message}"),
+            );
+            push_and_append_log(supervisor.kind, &state, &logs, &fallback_message).await;
+            next_context = RestartContext {
+                fastpath: None,
+                ..attempted_context
+            };
+            next_reason = StartReason::AutomaticRestart;
+            continue;
+        }
         match unexpected_exit_decision(&supervisor, &state, &message).await {
             RestartDecision::Ignore => return Ok(()),
             RestartDecision::Fail(failure_message) => {
@@ -238,6 +289,7 @@ async fn start_with_context(
 enum StartAttemptOutcome {
     Finished,
     StartupExited {
+        backend: ServiceBackend,
         state: SharedAppState,
         logs: LogPaths,
         message: String,
@@ -251,7 +303,13 @@ async fn start_with_context_attempt(
 ) -> anyhow::Result<StartAttemptOutcome> {
     let state = context.state.clone();
     let logs = context.logs.clone();
-    let launch = match build_service_launch(supervisor.kind, &context.config, &context.model_path) {
+    let launch = match build_service_launch_with_fastpath(
+        supervisor.kind,
+        &context.config,
+        &context.model_path,
+        &context.runtime,
+        context.fastpath.as_ref(),
+    ) {
         Ok(launch) => launch,
         Err(error) => {
             let _operation_guard = supervisor.operation_lock.lock().await;
@@ -280,7 +338,9 @@ async fn start_with_context_attempt(
             return Err(error);
         }
 
-        let starting_message = service_message(supervisor.kind, "Starting llama-server.exe");
+        let process_name = launch.backend.process_name();
+        let starting_message =
+            service_message(supervisor.kind, &format!("Starting {process_name}"));
         set_status(
             &state,
             supervisor.kind,
@@ -292,19 +352,39 @@ async fn start_with_context_attempt(
         append_log(&logs.app_log, &starting_message)?;
 
         let server_log = logs.server_log_for(supervisor.kind).to_path_buf();
-        let child = match prepare_server_log(&server_log)
-            .and_then(|_| spawn_server(&context.runtime, &launch.args))
-        {
+        let child = match prepare_server_log(&server_log).and_then(|_| spawn_server(&launch)) {
             Ok(child) => child,
             Err(error) => {
+                if launch.backend == ServiceBackend::EmbeddingFastPath {
+                    return Ok(StartAttemptOutcome::StartupExited {
+                        backend: launch.backend,
+                        state,
+                        logs,
+                        message: error.to_string(),
+                    });
+                }
                 fail_start(supervisor.kind, &state, &logs, &error.to_string()).await?;
                 return Err(error);
             }
         };
 
-        let child_generation =
-            store_child_with_log_readers(supervisor, child, state.clone(), server_log).await?;
-        remember_restart_context(supervisor, context.clone(), reason).await;
+        let child_generation = store_child_with_log_readers(
+            supervisor,
+            child,
+            launch.backend,
+            state.clone(),
+            server_log,
+        )
+        .await?;
+        let restart_context = if launch.backend == ServiceBackend::EmbeddingFastPath {
+            RestartContext {
+                fastpath: None,
+                ..context.clone()
+            }
+        } else {
+            context.clone()
+        };
+        remember_restart_context(supervisor, restart_context, reason).await;
 
         child_generation
     };
@@ -313,6 +393,7 @@ async fn start_with_context_attempt(
         Ok(StartupHealthWait::Healthy) => {}
         Ok(StartupHealthWait::ChildExited(message)) => {
             return Ok(StartAttemptOutcome::StartupExited {
+                backend: launch.backend,
                 state,
                 logs,
                 message,
@@ -331,6 +412,7 @@ async fn start_with_context_attempt(
                 Ok(StartupChildState::CurrentAlive) => {}
                 Ok(StartupChildState::CurrentExited(message)) => {
                     return Ok(StartAttemptOutcome::StartupExited {
+                        backend: launch.backend,
                         state,
                         logs,
                         message,
@@ -347,9 +429,20 @@ async fn start_with_context_attempt(
 
             let message = service_message(
                 supervisor.kind,
-                &format!("llama-server.exe health check failed: {error}"),
+                &format!(
+                    "{} health check failed: {error}",
+                    launch.backend.process_name()
+                ),
             );
             let cleanup_result = kill_child(supervisor).await;
+            if launch.backend == ServiceBackend::EmbeddingFastPath && cleanup_result.is_ok() {
+                return Ok(StartAttemptOutcome::StartupExited {
+                    backend: launch.backend,
+                    state,
+                    logs,
+                    message,
+                });
+            }
             set_status(
                 &state,
                 supervisor.kind,
@@ -413,6 +506,7 @@ async fn start_with_context_attempt(
         Ok(StartupChildState::CurrentAlive) => {}
         Ok(StartupChildState::CurrentExited(message)) => {
             return Ok(StartAttemptOutcome::StartupExited {
+                backend: launch.backend,
                 state,
                 logs,
                 message,
@@ -427,7 +521,10 @@ async fn start_with_context_attempt(
         }
     };
 
-    let running_message = service_message(supervisor.kind, "llama-server.exe is running");
+    let running_message = service_message(
+        supervisor.kind,
+        &format!("{} is running", launch.backend.process_name()),
+    );
     set_status(
         &state,
         supervisor.kind,
@@ -441,10 +538,26 @@ async fn start_with_context_attempt(
     Ok(StartAttemptOutcome::Finished)
 }
 
+#[cfg(test)]
 fn build_service_launch(
     service: ServiceKind,
     config: &AppConfig,
     model_path: &Path,
+) -> anyhow::Result<ServiceLaunch> {
+    let runtime = RuntimeLayout {
+        runtime_dir: PathBuf::new(),
+        server_exe: PathBuf::from("llama-server.exe"),
+        marker_path: PathBuf::new(),
+    };
+    build_service_launch_with_fastpath(service, config, model_path, &runtime, None)
+}
+
+fn build_service_launch_with_fastpath(
+    service: ServiceKind,
+    config: &AppConfig,
+    model_path: &Path,
+    runtime: &RuntimeLayout,
+    fastpath: Option<&FastPathLayout>,
 ) -> anyhow::Result<ServiceLaunch> {
     let public_port = config.service_port(service);
     let protocol = config.service_protocol(service);
@@ -455,8 +568,49 @@ fn build_service_launch(
     } else {
         (config.host.clone(), public_port)
     };
-    let args =
-        build_service_llama_server_args_for_endpoint(service, config, model_path, &host, port)?;
+    let (backend, program, current_dir, path_prefix, args) = if service == ServiceKind::Embedding {
+        if let Some(fastpath) = fastpath {
+            (
+                ServiceBackend::EmbeddingFastPath,
+                fastpath.server_exe.clone(),
+                fastpath.runtime_dir.clone(),
+                Some(fastpath.runtime_dir.clone()),
+                vec![
+                    "--host".to_string(),
+                    host.clone(),
+                    "--port".to_string(),
+                    port.to_string(),
+                    "--model".to_string(),
+                    fastpath.model_path.to_string_lossy().into_owned(),
+                    "--tokenizer".to_string(),
+                    fastpath.tokenizer_path.to_string_lossy().into_owned(),
+                    "--ort-dll".to_string(),
+                    fastpath.ort_dll.to_string_lossy().into_owned(),
+                ],
+            )
+        } else {
+            let args = build_service_llama_server_args_for_endpoint(
+                service, config, model_path, &host, port,
+            )?;
+            (
+                ServiceBackend::Llama,
+                runtime.server_exe.clone(),
+                runtime.runtime_dir.clone(),
+                None,
+                args,
+            )
+        }
+    } else {
+        let args =
+            build_service_llama_server_args_for_endpoint(service, config, model_path, &host, port)?;
+        (
+            ServiceBackend::Llama,
+            runtime.server_exe.clone(),
+            runtime.runtime_dir.clone(),
+            None,
+            args,
+        )
+    };
     let health_url = if plan.use_proxy {
         format!("http://127.0.0.1:{port}/health")
     } else {
@@ -464,6 +618,10 @@ fn build_service_launch(
     };
 
     Ok(ServiceLaunch {
+        backend,
+        program,
+        current_dir,
+        path_prefix,
         args,
         health_url,
         ports,
@@ -639,6 +797,7 @@ async fn reject_if_child_running(supervisor: &ProcessSupervisor) -> anyhow::Resu
 async fn store_child_with_log_readers(
     supervisor: &ProcessSupervisor,
     mut child: Child,
+    backend: ServiceBackend,
     state: SharedAppState,
     server_log: PathBuf,
 ) -> anyhow::Result<ChildGeneration> {
@@ -662,6 +821,7 @@ async fn store_child_with_log_readers(
     *child_guard = Some(ManagedChild {
         child,
         generation,
+        backend,
         proxy: None,
     });
     Ok(generation)
@@ -763,6 +923,7 @@ async fn startup_child_state(
 
     match managed_child.child.try_wait() {
         Ok(Some(status)) => {
+            let backend = managed_child.backend;
             let proxy = managed_child.proxy.take();
             *child_guard = None;
             drop(child_guard);
@@ -770,7 +931,8 @@ async fn startup_child_state(
                 proxy.shutdown().await;
             }
             Ok(StartupChildState::CurrentExited(format!(
-                "llama-server.exe exited unexpectedly: {status}"
+                "{} exited unexpectedly: {status}",
+                backend.process_name()
             )))
         }
         Ok(None) => Ok(StartupChildState::CurrentAlive),
@@ -778,20 +940,30 @@ async fn startup_child_state(
     }
 }
 
-fn spawn_server(runtime: &RuntimeLayout, args: &[String]) -> anyhow::Result<Child> {
-    let mut command = Command::new(&runtime.server_exe);
+fn spawn_server(launch: &ServiceLaunch) -> anyhow::Result<Child> {
+    let mut command = Command::new(&launch.program);
     command
-        .args(args)
-        .current_dir(&runtime.runtime_dir)
+        .args(&launch.args)
+        .current_dir(&launch.current_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if let Some(path_prefix) = &launch.path_prefix {
+        let mut paths = vec![path_prefix.clone()];
+        if let Some(current_path) = std::env::var_os("PATH") {
+            paths.extend(std::env::split_paths(&current_path));
+        }
+        command.env(
+            "PATH",
+            std::env::join_paths(paths).context("failed to construct fast path DLL search PATH")?,
+        );
+    }
 
     #[cfg(target_os = "windows")]
     command.creation_flags(CREATE_NO_WINDOW);
 
     command
         .spawn()
-        .with_context(|| format!("failed to start {}", runtime.server_exe.display()))
+        .with_context(|| format!("failed to start {}", launch.program.display()))
 }
 
 fn spawn_log_reader<T>(kind: ServiceKind, stream: T, log_path: PathBuf, state: SharedAppState)
@@ -888,15 +1060,17 @@ async fn monitor_child_exit(
 
             match managed_child.child.try_wait() {
                 Ok(Some(status)) => {
+                    let backend = managed_child.backend;
                     let proxy = managed_child.proxy.take();
                     *child_guard = None;
                     drop(child_guard);
                     if let Some(proxy) = proxy {
                         proxy.shutdown().await;
                     }
-                    Some(MonitorExitEvent::Exited(format!(
-                        "llama-server.exe exited unexpectedly: {status}"
-                    )))
+                    Some(MonitorExitEvent::Exited(
+                        backend,
+                        format!("{} exited unexpectedly: {status}", backend.process_name()),
+                    ))
                 }
                 Ok(None) => None,
                 Err(error) => Some(MonitorExitEvent::MonitorFailed(format!(
@@ -907,8 +1081,8 @@ async fn monitor_child_exit(
 
         if let Some(event) = exit_event {
             match event {
-                MonitorExitEvent::Exited(message) => {
-                    handle_unexpected_exit(supervisor, state, logs, message).await;
+                MonitorExitEvent::Exited(backend, message) => {
+                    handle_unexpected_exit(supervisor, state, logs, backend, message).await;
                 }
                 MonitorExitEvent::MonitorFailed(message) => {
                     mark_unexpected_exit_failed(supervisor.kind, &state, &logs, &message).await;
@@ -922,7 +1096,7 @@ async fn monitor_child_exit(
 }
 
 enum MonitorExitEvent {
-    Exited(String),
+    Exited(ServiceBackend, String),
     MonitorFailed(String),
 }
 
@@ -982,9 +1156,14 @@ async fn handle_unexpected_exit(
     supervisor: ProcessSupervisor,
     state: SharedAppState,
     logs: LogPaths,
+    backend: ServiceBackend,
     message: String,
 ) -> UnexpectedExitOutcome {
-    let restart_decision = unexpected_exit_decision(&supervisor, &state, &message).await;
+    let restart_decision = if backend == ServiceBackend::EmbeddingFastPath {
+        fastpath_fallback_decision(&supervisor, &state, &message).await
+    } else {
+        unexpected_exit_decision(&supervisor, &state, &message).await
+    };
 
     match restart_decision {
         RestartDecision::Ignore => UnexpectedExitOutcome::Ignored,
@@ -994,10 +1173,17 @@ async fn handle_unexpected_exit(
         }
         RestartDecision::Restart(context) => {
             let service = supervisor.kind;
-            let restart_message = service_message(
-                service,
-                &format!("Restarting llama-server.exe after unexpected exit: {message}"),
-            );
+            let restart_message = if backend == ServiceBackend::EmbeddingFastPath {
+                service_message(
+                    service,
+                    &format!("Embedding fast path exited; falling back to llama.cpp: {message}"),
+                )
+            } else {
+                service_message(
+                    service,
+                    &format!("Restarting llama-server.exe after unexpected exit: {message}"),
+                )
+            };
             push_and_append_log(service, &state, &logs, &restart_message).await;
             if let Err(error) =
                 start_with_context(supervisor, context, StartReason::AutomaticRestart).await
@@ -1012,6 +1198,26 @@ async fn handle_unexpected_exit(
             UnexpectedExitOutcome::Restarted
         }
     }
+}
+
+async fn fastpath_fallback_decision(
+    supervisor: &ProcessSupervisor,
+    state: &SharedAppState,
+    message: &str,
+) -> RestartDecision {
+    if !status_allows_unexpected_exit_handling(supervisor.kind, state).await
+        || supervisor.shutdown_requested.load(Ordering::SeqCst)
+    {
+        return RestartDecision::Ignore;
+    }
+    supervisor
+        .restart_state
+        .lock()
+        .await
+        .context
+        .clone()
+        .map(RestartDecision::Restart)
+        .unwrap_or_else(|| RestartDecision::Fail(message.to_string()))
 }
 
 async fn unexpected_exit_decision(
@@ -1401,6 +1607,43 @@ mod tests {
         assert_eq!(launch.health_url, "http://127.0.0.1:8013/health");
     }
 
+    #[test]
+    fn embedding_fastpath_launch_uses_sidecar_assets() {
+        let config = AppConfig {
+            embedding: ServiceConfig::new_for(ServiceKind::Embedding, true, 8013, String::new()),
+            ..AppConfig::default()
+        };
+        let runtime = RuntimeLayout {
+            runtime_dir: PathBuf::from("C:\\llama"),
+            server_exe: PathBuf::from("C:\\llama\\llama-server.exe"),
+            marker_path: PathBuf::from("C:\\llama\\runtime.json"),
+        };
+        let fastpath = FastPathLayout {
+            server_exe: PathBuf::from("C:\\resources\\vekai-embedding-fastpath.exe"),
+            runtime_dir: PathBuf::from("C:\\fastpath\\runtime"),
+            model_path: PathBuf::from("C:\\fastpath\\model\\embedding.onnx"),
+            tokenizer_path: PathBuf::from("C:\\fastpath\\model\\tokenizer.json"),
+            ort_dll: PathBuf::from("C:\\fastpath\\runtime\\onnxruntime.dll"),
+        };
+
+        let launch = build_service_launch_with_fastpath(
+            ServiceKind::Embedding,
+            &config,
+            Path::new("C:\\models\\Qwen3-Embedding-0.6B-Q8_0.gguf"),
+            &runtime,
+            Some(&fastpath),
+        )
+        .expect("fast path launch should build");
+
+        assert_eq!(launch.backend, ServiceBackend::EmbeddingFastPath);
+        assert_eq!(launch.program, fastpath.server_exe);
+        assert_eq!(launch.path_prefix.as_deref(), Some(fastpath.runtime_dir.as_path()));
+        assert!(launch
+            .args
+            .windows(2)
+            .any(|window| window == ["--ort-dll", "C:\\fastpath\\runtime\\onnxruntime.dll"]));
+    }
+
     #[tokio::test]
     async fn launch_port_check_rejects_occupied_public_port() {
         let listener = TcpListener::bind(("127.0.0.1", 0))
@@ -1443,6 +1686,48 @@ mod tests {
             crash_exit_action(true, None, now, false),
             CrashExitAction::Restart
         );
+    }
+
+    #[tokio::test]
+    async fn fastpath_exit_falls_back_even_when_crash_restart_is_disabled() {
+        let manager = ProcessManager::for_service(ServiceKind::Embedding);
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let logs = LogPaths {
+            log_dir: temp_dir.path().to_path_buf(),
+            app_log: temp_dir.path().join("app.log"),
+            server_log: temp_dir.path().join("server.log"),
+            embedding_server_log: temp_dir.path().join("embedding-server.log"),
+        };
+        let config = AppConfig {
+            restart_on_crash: false,
+            ..AppConfig::default()
+        };
+        let state = Arc::new(Mutex::new(AppStateInner::new(config.clone())));
+        state
+            .lock()
+            .await
+            .set_service_status(ServiceKind::Embedding, ServiceStatus::Running);
+        manager.restart_state.lock().await.context = Some(RestartContext {
+            config,
+            runtime: RuntimeLayout {
+                runtime_dir: temp_dir.path().join("runtime"),
+                server_exe: temp_dir.path().join("runtime").join("llama-server.exe"),
+                marker_path: temp_dir.path().join("runtime").join("runtime.json"),
+            },
+            model_path: temp_dir.path().join("model.gguf"),
+            state: state.clone(),
+            logs,
+            fastpath: None,
+        });
+
+        let decision = fastpath_fallback_decision(
+            &manager.supervisor(),
+            &state,
+            "fast path crashed",
+        )
+        .await;
+
+        assert!(matches!(decision, RestartDecision::Restart(_)));
     }
 
     #[test]
@@ -1561,6 +1846,7 @@ mod tests {
             model_path: temp_dir.path().join("models").join("model.gguf"),
             state: state.clone(),
             logs: logs.clone(),
+            fastpath: None,
         };
         {
             let mut restart_state = manager.restart_state.lock().await;
@@ -1571,6 +1857,7 @@ mod tests {
             manager.supervisor(),
             state.clone(),
             logs.clone(),
+            ServiceBackend::Llama,
             "llama-server.exe exited unexpectedly: test crash".to_string(),
         )
         .await;
@@ -1629,6 +1916,7 @@ mod tests {
             model_path: temp_dir.path().join("models").join("model.gguf"),
             state: state.clone(),
             logs: logs.clone(),
+            fastpath: None,
         };
         {
             let mut restart_state = manager.restart_state.lock().await;
@@ -1639,6 +1927,7 @@ mod tests {
             manager.supervisor(),
             state.clone(),
             logs.clone(),
+            ServiceBackend::Llama,
             "llama-server.exe exited unexpectedly: test crash".to_string(),
         )
         .await;
@@ -1696,6 +1985,7 @@ mod tests {
             model_path: temp_dir.path().join("models").join("model.gguf"),
             state: state.clone(),
             logs: logs.clone(),
+            fastpath: None,
         };
         {
             let mut restart_state = manager.restart_state.lock().await;
@@ -1706,6 +1996,7 @@ mod tests {
             manager.supervisor(),
             state.clone(),
             logs.clone(),
+            ServiceBackend::Llama,
             "llama-server.exe exited unexpectedly: test crash".to_string(),
         )
         .await;
@@ -1761,6 +2052,7 @@ mod tests {
             model_path: temp_dir.path().join("models").join("model.gguf"),
             state: state.clone(),
             logs: logs.clone(),
+            fastpath: None,
         };
 
         let result = tokio::time::timeout(
@@ -1823,6 +2115,7 @@ mod tests {
             model_path: temp_dir.path().join("models").join("model.gguf"),
             state: state.clone(),
             logs: logs.clone(),
+            fastpath: None,
         };
 
         let start_task = tokio::spawn(start_with_context(
@@ -1912,6 +2205,7 @@ mod tests {
             model_path: temp_dir.path().join("models").join("model-a.gguf"),
             state: state.clone(),
             logs: logs.clone(),
+            fastpath: None,
         };
         let first_start = tokio::spawn(start_with_context(
             manager.supervisor(),
@@ -1935,6 +2229,7 @@ mod tests {
             model_path: temp_dir.path().join("models").join("model-b.gguf"),
             state: state.clone(),
             logs: logs.clone(),
+            fastpath: None,
         };
         let second_start = tokio::spawn(start_with_context(
             manager.supervisor(),
@@ -2011,6 +2306,7 @@ mod tests {
             model_path: temp_dir.path().join("models").join("model.gguf"),
             state: state.clone(),
             logs: logs.clone(),
+            fastpath: None,
         };
         {
             let mut restart_state = manager.restart_state.lock().await;
@@ -2022,6 +2318,7 @@ mod tests {
             manager.supervisor(),
             state.clone(),
             logs.clone(),
+            ServiceBackend::Llama,
             "llama-server.exe exited unexpectedly: test crash".to_string(),
         )
         .await;
@@ -2063,6 +2360,7 @@ mod tests {
         *manager.child.lock().await = Some(ManagedChild {
             child,
             generation: child_generation,
+            backend: ServiceBackend::Llama,
             proxy: None,
         });
 

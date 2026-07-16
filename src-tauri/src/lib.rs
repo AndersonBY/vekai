@@ -34,6 +34,7 @@ const CLOSE_CONFIRM_SCRIPT: &str = r#"
 pub mod cli;
 pub mod commands;
 pub mod config;
+pub mod fastpath;
 pub mod llama_args;
 pub mod logging;
 pub mod models;

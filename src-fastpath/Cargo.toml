@@ -1,0 +1,21 @@
+[package]
+name = "vekai-embedding-fastpath"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow = "1"
+axum = "0.8"
+base64 = "0.22"
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "load-dynamic", "cuda", "api-23"] }
+pico-args = "0.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokenizers = { version = "0.22.2", default-features = false, features = ["onig"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

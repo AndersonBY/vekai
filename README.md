@@ -13,6 +13,7 @@ Vekai is a Windows tray application that also provides Linux GUI/CLI service mod
 - Runs local Embedding and Rerank services at the same time.
 - Lets users choose any `.gguf` model file path instead of requiring a fixed model directory.
 - Provides `scripts\download-assets.ps1` to download default GGUF models; source packaging and runtime override flows can also download the latest matching llama.cpp runtime.
+- Offers an optional ONNX Runtime CUDA Embedding fast path on NVIDIA Windows x64, with automatic llama.cpp fallback when assets are absent or the sidecar fails.
 - Supports native llama.cpp endpoints plus SiliconFlow, Cohere, Jina, Voyage, and custom JSON HTTP compatible response shapes.
 - Starts with a Chinese UI by default and includes an English language switch.
 - Stays in the Windows system tray with actions for settings, logs, and quit.
@@ -49,6 +50,14 @@ On NVIDIA Windows x64 machines, install the CUDA 12.4 accelerated runtime below 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1 -WindowsBackend cuda -SkipModels
 ```
+
+Qwen3-Embedding-0.6B can use the faster FP16 ONNX CUDA path. The installer script pins and verifies the model, ONNX Runtime, CUDA, cuBLAS, cuFFT, and cuDNN assets. Restart the services after it completes:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\download-fastpath.ps1
+```
+
+The fast path activates only when the selected file matches `Qwen3-Embedding-0.6B*.gguf`; endpoints and protocols do not change. A `/health` response with `backend: ort_cuda` confirms it is active. Vekai starts llama.cpp on the same port if the sidecar cannot start, misses its health deadline, or exits while running.
 
 ## Default URLs
 
@@ -159,6 +168,7 @@ curl.exe http://127.0.0.1:8013/health
 | Logs | `%LOCALAPPDATA%\Vekai\logs` |
 | Runtime source | Bundled package `downloads/`; overridable via `%LOCALAPPDATA%\Vekai\downloads` or an exe-adjacent `downloads\` folder |
 | Extracted runtime | `%LOCALAPPDATA%\Vekai\runtimes` |
+| Embedding fast path assets | `%LOCALAPPDATA%\Vekai\fastpath` |
 | Default asset manifest | `scripts\assets.json` |
 
 Older development builds may have created `%LOCALAPPDATA%\LocalRerankServer\logs`. Current builds no longer write to that old directory.
@@ -178,6 +188,7 @@ Common commands:
 npm install
 powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1 -SkipRuntime
 powershell -ExecutionPolicy Bypass -File scripts\prepare-bundled-runtime.ps1
+powershell -ExecutionPolicy Bypass -File scripts\build-fastpath.ps1
 npm run tauri:dev
 npm run build
 cargo test --manifest-path src-tauri/Cargo.toml
@@ -208,7 +219,7 @@ The repository may also contain a copied delivery folder:
 - `release\Vekai 0.1.8\Vekai.exe`
 - `release\Vekai 0.1.8\Vekai_0.1.8_x64-setup.exe`
 
-The installer and exe include frontend assets and the matching llama.cpp runtime archive. GGUF models are not bundled. In a source checkout, run `scripts\download-assets.ps1 -SkipRuntime` to download default test models into `models\`.
+The installer and exe include frontend assets, the matching llama.cpp runtime archive, and the small Windows x64 fast path sidecar/ONNX graph. GGUF models, FP16 weights, and GPU DLLs are not bundled. In a source checkout, run `scripts\download-assets.ps1 -SkipRuntime` to download default test models into `models\`.
 
 ## Troubleshooting
 

@@ -1,4 +1,5 @@
 use crate::config::AppConfig;
+use crate::fastpath::discover_embedding_fastpath;
 use crate::logging::{append_log, log_paths, LogPaths};
 use crate::models::{
     choose_default_model_for_service, discover_model_catalog, discover_models, ModelCatalog,
@@ -382,14 +383,35 @@ pub async fn start_servers_inner(
                 }
             };
 
+        let fastpath = if service == ServiceKind::Embedding {
+            match discover_embedding_fastpath(
+                &paths.local_data_dir,
+                &paths.exe_dir,
+                &paths.download_dirs,
+                &model_path,
+            ) {
+                Ok(layout) => layout,
+                Err(error) => {
+                    let message =
+                        format!("Embedding fast path unavailable; using llama.cpp: {error}");
+                    append_log(&paths.logs.app_log, &message)?;
+                    state.lock().await.push_service_log(service, message);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         if let Err(error) = managers
             .manager(service)
-            .start(
+            .start_with_fastpath(
                 config.clone(),
                 runtime.clone(),
                 model_path,
                 state.clone(),
                 paths.logs.clone(),
+                fastpath,
             )
             .await
         {

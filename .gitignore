@@ -1,6 +1,9 @@
 node_modules/
 dist/
 src-tauri/target/
+src-fastpath/target/
+experiments/**/target/
+experiments/**/.venv/
 src-tauri/gen/
 release/
 docs/superpowers/
@@ -18,6 +21,7 @@ vite.config.js
 vite.config.d.ts
 *.log
 *.tmp
+src-tauri/resources/fastpath/vekai-embedding-fastpath.exe
 __pycache__/
 *.py[cod]
 .DS_Store

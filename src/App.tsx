@@ -28,13 +28,15 @@ type Language = "zh" | "en";
 
 const EMPTY_CONFIG: AppConfig = {
   host: "127.0.0.1",
-  rerank: { enabled: true, port: 8012, model_path: "", protocol: "llama_rerank" },
-  embedding: { enabled: true, port: 8013, model_path: "", protocol: "openai_embeddings" },
+  rerank: { enabled: true, port: 8012, model_path: "", protocol: "llama_rerank", parallel_slots: 0, batch_size: 0, ubatch_size: 0 },
+  embedding: { enabled: true, port: 8013, model_path: "", protocol: "openai_embeddings", parallel_slots: 0, batch_size: 0, ubatch_size: 0 },
   auto_start_server: true,
   restart_on_crash: true,
   gpu_layers: "auto",
   threads: 0,
   parallel_slots: 0,
+  batch_size: 0,
+  ubatch_size: 0,
   http_threads: 0,
   log_retention_days: 7,
 };
@@ -64,6 +66,8 @@ const SERVICE_IMPACTING_CONFIG_FIELDS: Array<keyof AppConfig> = [
   "gpu_layers",
   "threads",
   "parallel_slots",
+  "batch_size",
+  "ubatch_size",
   "http_threads",
 ];
 const SNAPSHOT_POLL_INTERVAL_MS = 1000;
@@ -89,6 +93,11 @@ const TEXT = {
     custom: "自定义",
     threads: "线程数",
     parallelSlots: "并发槽位",
+    parallelSlotsOverride: "并发槽位覆盖",
+    batchSize: "逻辑批大小",
+    batchSizeOverride: "逻辑批大小覆盖",
+    ubatchSize: "物理批大小",
+    ubatchSizeOverride: "物理批大小覆盖",
     httpThreads: "HTTP 线程数",
     logRetentionDays: "日志保留天数",
     autoStart: "启动后自动开启已启用服务",
@@ -179,6 +188,11 @@ const TEXT = {
     custom: "Custom",
     threads: "Threads",
     parallelSlots: "Parallel slots",
+    parallelSlotsOverride: "Parallel slots override",
+    batchSize: "Batch size",
+    batchSizeOverride: "Batch size override",
+    ubatchSize: "Physical batch size",
+    ubatchSizeOverride: "Physical batch size override",
     httpThreads: "HTTP threads",
     logRetentionDays: "Log retention days",
     autoStart: "Auto-start enabled services",
@@ -443,6 +457,54 @@ function ServicePanel(props: {
               </option>
             ))}
           </select>
+        </label>
+        <label>
+          {t.parallelSlotsOverride}
+          <input
+            type="number"
+            min={0}
+            max={65535}
+            value={serviceConfig.parallel_slots}
+            disabled={disabled}
+            onChange={(event) =>
+              props.onServiceConfigChange(service, {
+                ...serviceConfig,
+                parallel_slots: Number(event.target.value),
+              })
+            }
+          />
+        </label>
+        <label>
+          {t.batchSizeOverride}
+          <input
+            type="number"
+            min={0}
+            max={65535}
+            value={serviceConfig.batch_size}
+            disabled={disabled}
+            onChange={(event) =>
+              props.onServiceConfigChange(service, {
+                ...serviceConfig,
+                batch_size: Number(event.target.value),
+              })
+            }
+          />
+        </label>
+        <label>
+          {t.ubatchSizeOverride}
+          <input
+            type="number"
+            min={0}
+            max={65535}
+            value={serviceConfig.ubatch_size}
+            disabled={disabled}
+            onChange={(event) =>
+              props.onServiceConfigChange(service, {
+                ...serviceConfig,
+                ubatch_size: Number(event.target.value),
+              })
+            }
+          />
         </label>
       </div>
 
@@ -878,6 +940,14 @@ export default function App() {
           <label>
             {t.parallelSlots}
             <input type="number" min={0} max={65535} value={config.parallel_slots} onChange={(event) => updateConfig("parallel_slots", Number(event.target.value))} />
+          </label>
+          <label>
+            {t.batchSize}
+            <input type="number" min={0} max={65535} value={config.batch_size} onChange={(event) => updateConfig("batch_size", Number(event.target.value))} />
+          </label>
+          <label>
+            {t.ubatchSize}
+            <input type="number" min={0} max={65535} value={config.ubatch_size} onChange={(event) => updateConfig("ubatch_size", Number(event.target.value))} />
           </label>
           <label>
             {t.httpThreads}

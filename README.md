@@ -64,10 +64,13 @@ When the host is set to `0.0.0.0`, services listen on all network interfaces. Us
 | GPU layers | `auto` lets llama.cpp choose, `all` offloads as much as possible, or use a non-negative integer. |
 | Threads | Maps to llama.cpp `--threads`; `0` means automatic. |
 | Parallel slots | Maps to llama.cpp `--parallel` and controls same-service inference slots; `0` means automatic. |
+| Batch size | Maps to llama.cpp `--batch-size`; `0` means automatic. |
+| Physical batch size | Maps to llama.cpp `--ubatch-size`; `0` means automatic. Higher values can improve GPU batch throughput while using more VRAM. |
+| Per-service performance overrides | Each service can override parallel slots, batch size, and physical batch size; `0` inherits the shared setting. |
 | HTTP threads | Maps to llama.cpp `--threads-http`; `0` means automatic. |
 | Auto-start enabled services | Starts enabled services when the app starts. |
 | Restart on crash | Restarts `llama-server`/`llama-server.exe` after an unexpected exit. |
-| Log retention days | Defaults to 7 days. |
+| Log retention days | Defaults to 7 days; each llama.cpp service log is truncated before the next start when it exceeds 16 MiB. |
 
 If a service-impacting setting changes while a service is running, the Save button becomes Save & Restart.
 

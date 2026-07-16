@@ -357,7 +357,7 @@ pub async fn start_servers_inner(
     config.validate()?;
 
     let runtime = ensure_runtime_from_downloads(&paths.runtime_root, &paths.download_dirs)?;
-    for service in ServiceKind::ALL {
+    for service in ServiceKind::START_ORDER {
         if !config.service_enabled(service) {
             continue;
         }

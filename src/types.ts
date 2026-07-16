@@ -14,6 +14,8 @@ export interface AppConfig {
   gpu_layers: string;
   threads: number;
   parallel_slots: number;
+  batch_size: number;
+  ubatch_size: number;
   http_threads: number;
   log_retention_days: number;
 }
@@ -23,6 +25,9 @@ export interface ServiceConfig {
   port: number;
   model_path: string;
   protocol: string;
+  parallel_slots: number;
+  batch_size: number;
+  ubatch_size: number;
 }
 
 export interface ModelInfo {

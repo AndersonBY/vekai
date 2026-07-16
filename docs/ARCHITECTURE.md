@@ -63,19 +63,27 @@ Rust app state and config
     "enabled": true,
     "port": 8012,
     "model_path": "",
-    "protocol": "llama_rerank"
+    "protocol": "llama_rerank",
+    "parallel_slots": 0,
+    "batch_size": 0,
+    "ubatch_size": 0
   },
   "embedding": {
     "enabled": true,
     "port": 8013,
     "model_path": "",
-    "protocol": "openai_embeddings"
+    "protocol": "openai_embeddings",
+    "parallel_slots": 0,
+    "batch_size": 0,
+    "ubatch_size": 0
   },
   "auto_start_server": true,
   "restart_on_crash": true,
   "gpu_layers": "auto",
   "threads": 0,
   "parallel_slots": 0,
+  "batch_size": 0,
+  "ubatch_size": 0,
   "http_threads": 0,
   "log_retention_days": 7
 }
@@ -83,7 +91,9 @@ Rust app state and config
 
 开发期不维护旧版顶层 Rerank 配置兼容。如果配置结构变化，直接同步文档和测试。
 
-`threads` 映射到 `llama-server --threads`，`parallel_slots` 映射到 `--parallel`，`http_threads` 映射到 `--threads-http`。这三个数字字段都使用 `0` 表示不传对应参数，由 llama.cpp 自动决定。
+`threads` 映射到 `llama-server --threads`，`parallel_slots` 映射到 `--parallel`，`batch_size` 映射到 `--batch-size`，`ubatch_size` 映射到 `--ubatch-size`，`http_threads` 映射到 `--threads-http`。这些数字字段都使用 `0` 表示不传对应参数，由 llama.cpp 自动决定。每个服务内的同名 slot/batch 字段非零时覆盖通用设置。`gpu_layers` 设为 `all` 时同时传入 `--fit off`，尊重用户要求全部 GPU offload 的显式选择，并跳过自动显存拟合。
+
+Embedding 和 Rerank 请求不复用生成式 KV 状态，因此启动参数固定包含 `--cache-ram 0`，避免 llama.cpp 的 8 GiB prompt cache 管理开销。运行时日志使用 `--log-verbosity 1`，只保留错误级输出；每个服务日志在启动前检查，超过 16 MiB 时截断并写入说明，防止高频推理长期写盘拖慢服务。
 
 ## 运行模式
 
@@ -99,7 +109,7 @@ vekai uninstall-service
 
 ## 服务启动模型
 
-每个服务都有自己的启用状态、端口、模型路径和协议。启动时会：
+每个服务都有自己的启用状态、端口、模型路径、协议和性能覆盖项。启用两个服务时先加载较大的 Embedding 模型，再加载 Rerank 模型，降低第二个模型分配 GPU 资源时的等待。启动时会：
 
 1. 读取当前配置。
 2. 确认服务已启用且模型路径存在。

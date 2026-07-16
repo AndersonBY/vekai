@@ -64,10 +64,13 @@ powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1 -RuntimePla
 | GPU 层数 | `auto` 自动选择，`all` 尽量全部放入 GPU，也可以填非负整数。 |
 | 线程数 | 映射到 llama.cpp `--threads`，`0` 表示自动。 |
 | 并发槽位 | 映射到 llama.cpp `--parallel`，控制同一服务的推理并发 slot，`0` 表示自动。 |
+| 逻辑批大小 | 映射到 llama.cpp `--batch-size`，`0` 表示自动。 |
+| 物理批大小 | 映射到 llama.cpp `--ubatch-size`，`0` 表示自动。较大的值可提高 GPU 批量吞吐，也会增加显存占用。 |
+| 服务性能覆盖 | 每个服务可单独覆盖并发槽位、逻辑批大小和物理批大小；`0` 表示继承通用设置。 |
 | HTTP 线程数 | 映射到 llama.cpp `--threads-http`，`0` 表示自动。 |
 | 启动后自动开启已启用服务 | 应用启动后自动启动已勾选的服务。 |
 | 崩溃后自动重启 | llama-server 异常退出后自动尝试重启。 |
-| 日志保留天数 | 默认保留 7 天。 |
+| 日志保留天数 | 默认保留 7 天；单个 llama.cpp 服务日志超过 16 MiB 时会在下次启动前截断。 |
 
 服务运行中修改会影响服务的配置后，保存按钮会变成“保存并重启”。
 

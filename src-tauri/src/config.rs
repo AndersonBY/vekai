@@ -11,6 +11,9 @@ pub struct ServiceConfig {
     pub port: u16,
     pub model_path: String,
     pub protocol: String,
+    pub parallel_slots: u16,
+    pub batch_size: u16,
+    pub ubatch_size: u16,
 }
 
 impl ServiceConfig {
@@ -24,6 +27,9 @@ impl ServiceConfig {
             port,
             model_path,
             protocol: default_protocol(service).to_string(),
+            parallel_slots: 0,
+            batch_size: 0,
+            ubatch_size: 0,
         }
     }
 
@@ -42,6 +48,9 @@ impl ServiceConfig {
             port: service.default_port(),
             model_path: String::new(),
             protocol: default_protocol(service).to_string(),
+            parallel_slots: 0,
+            batch_size: 0,
+            ubatch_size: 0,
         }
     }
 }
@@ -63,6 +72,8 @@ pub struct AppConfig {
     pub gpu_layers: String,
     pub threads: u16,
     pub parallel_slots: u16,
+    pub batch_size: u16,
+    pub ubatch_size: u16,
     pub http_threads: u16,
     pub log_retention_days: u16,
 }
@@ -78,6 +89,8 @@ impl Default for AppConfig {
             gpu_layers: "auto".to_string(),
             threads: 0,
             parallel_slots: 0,
+            batch_size: 0,
+            ubatch_size: 0,
             http_threads: 0,
             log_retention_days: 7,
         }
@@ -281,6 +294,8 @@ mod tests {
         assert_eq!(config.gpu_layers, "auto");
         assert_eq!(config.threads, 0);
         assert_eq!(config.parallel_slots, 0);
+        assert_eq!(config.batch_size, 0);
+        assert_eq!(config.ubatch_size, 0);
         assert_eq!(config.http_threads, 0);
         assert_eq!(config.log_retention_days, 7);
     }
@@ -370,6 +385,8 @@ mod tests {
         assert_eq!(config.gpu_layers, "auto");
         assert_eq!(config.threads, 0);
         assert_eq!(config.parallel_slots, 0);
+        assert_eq!(config.batch_size, 0);
+        assert_eq!(config.ubatch_size, 0);
         assert_eq!(config.http_threads, 0);
         assert_eq!(config.log_retention_days, 7);
     }

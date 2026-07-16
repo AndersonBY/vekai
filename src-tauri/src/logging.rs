@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 
 use crate::service::ServiceKind;
 
+pub const MAX_SERVER_LOG_BYTES: u64 = 16 * 1024 * 1024;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogPaths {
     pub log_dir: PathBuf,
@@ -55,6 +57,35 @@ pub fn append_log(path: &Path, line: &str) -> anyhow::Result<()> {
 
     writeln!(file, "[{timestamp}] {line}")
         .with_context(|| format!("failed to append log line to {}", path.display()))
+}
+
+pub fn prepare_server_log(path: &Path) -> anyhow::Result<bool> {
+    truncate_log_if_oversized(path, MAX_SERVER_LOG_BYTES)
+}
+
+fn truncate_log_if_oversized(path: &Path, max_bytes: u64) -> anyhow::Result<bool> {
+    let Ok(metadata) = fs::metadata(path) else {
+        return Ok(false);
+    };
+
+    if metadata.len() <= max_bytes {
+        return Ok(false);
+    }
+
+    let timestamp = Utc::now().to_rfc3339();
+    let mut file = OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(path)
+        .with_context(|| format!("failed to truncate oversized log file {}", path.display()))?;
+
+    writeln!(
+        file,
+        "[{timestamp}] Runtime log exceeded {max_bytes} bytes and was truncated before restart."
+    )
+    .with_context(|| format!("failed to write truncation notice to {}", path.display()))?;
+
+    Ok(true)
 }
 
 pub fn cleanup_old_logs(log_dir: &Path, retention_days: u16) -> anyhow::Result<()> {
@@ -167,5 +198,31 @@ mod tests {
         let missing_dir = temp_dir.path().join("missing");
 
         cleanup_old_logs(&missing_dir, 7).expect("missing log dir should be ok");
+    }
+
+    #[test]
+    fn oversized_server_log_is_truncated_with_notice() {
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let log_path = temp_dir.path().join("server.log");
+        fs::write(&log_path, vec![b'x'; 9]).expect("test log should be written");
+
+        assert!(truncate_log_if_oversized(&log_path, 8).expect("oversized log should be truncated"));
+
+        let contents = fs::read_to_string(&log_path).expect("truncated log should be readable");
+        assert!(contents.contains("Runtime log exceeded 8 bytes"));
+        assert!(contents.len() < 256);
+    }
+
+    #[test]
+    fn server_log_within_limit_is_preserved() {
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let log_path = temp_dir.path().join("server.log");
+        fs::write(&log_path, b"keep me").expect("test log should be written");
+
+        assert!(!truncate_log_if_oversized(&log_path, 8).expect("small log should be accepted"));
+        assert_eq!(
+            fs::read(&log_path).expect("log should be readable"),
+            b"keep me"
+        );
     }
 }

@@ -8,6 +8,7 @@ pub enum ServiceKind {
 
 impl ServiceKind {
     pub const ALL: [Self; 2] = [Self::Rerank, Self::Embedding];
+    pub const START_ORDER: [Self; 2] = [Self::Embedding, Self::Rerank];
 
     pub fn display_name(self) -> &'static str {
         match self {

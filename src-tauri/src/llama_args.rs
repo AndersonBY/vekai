@@ -32,6 +32,7 @@ pub fn build_service_llama_server_args_for_endpoint(
     port: u16,
 ) -> Result<Vec<String>, ConfigError> {
     config.validate()?;
+    let service_config = config.service_config(service);
 
     let mut args = vec![
         "-m".to_string(),
@@ -53,6 +54,10 @@ pub fn build_service_llama_server_args_for_endpoint(
         "--port".to_string(),
         port.to_string(),
         "--no-webui".to_string(),
+        "--cache-ram".to_string(),
+        "0".to_string(),
+        "--log-verbosity".to_string(),
+        "1".to_string(),
     ]);
 
     if !config.gpu_layers.is_empty() {
@@ -60,14 +65,43 @@ pub fn build_service_llama_server_args_for_endpoint(
         args.push(config.gpu_layers.clone());
     }
 
+    if config.gpu_layers == "all" {
+        args.extend(["--fit".to_string(), "off".to_string()]);
+    }
+
     if config.threads > 0 {
         args.push("--threads".to_string());
         args.push(config.threads.to_string());
     }
 
-    if config.parallel_slots > 0 {
+    let parallel_slots = if service_config.parallel_slots > 0 {
+        service_config.parallel_slots
+    } else {
+        config.parallel_slots
+    };
+    if parallel_slots > 0 {
         args.push("--parallel".to_string());
-        args.push(config.parallel_slots.to_string());
+        args.push(parallel_slots.to_string());
+    }
+
+    let batch_size = if service_config.batch_size > 0 {
+        service_config.batch_size
+    } else {
+        config.batch_size
+    };
+    if batch_size > 0 {
+        args.push("--batch-size".to_string());
+        args.push(batch_size.to_string());
+    }
+
+    let ubatch_size = if service_config.ubatch_size > 0 {
+        service_config.ubatch_size
+    } else {
+        config.ubatch_size
+    };
+    if ubatch_size > 0 {
+        args.push("--ubatch-size".to_string());
+        args.push(ubatch_size.to_string());
     }
 
     if config.http_threads > 0 {
@@ -112,6 +146,10 @@ mod tests {
                 "--port",
                 "9001",
                 "--no-webui",
+                "--cache-ram",
+                "0",
+                "--log-verbosity",
+                "1",
                 "--n-gpu-layers",
                 "auto",
             ]
@@ -124,6 +162,8 @@ mod tests {
             gpu_layers: "auto".to_string(),
             threads: 0,
             parallel_slots: 0,
+            batch_size: 0,
+            ubatch_size: 0,
             http_threads: 0,
             ..AppConfig::default()
         };
@@ -136,7 +176,13 @@ mod tests {
             .any(|window| window == ["--n-gpu-layers", "auto"]));
         assert!(!args.iter().any(|arg| arg == "--threads"));
         assert!(!args.iter().any(|arg| arg == "--parallel"));
+        assert!(!args.iter().any(|arg| arg == "--batch-size"));
+        assert!(!args.iter().any(|arg| arg == "--ubatch-size"));
         assert!(!args.iter().any(|arg| arg == "--threads-http"));
+        assert!(args.windows(2).any(|window| window == ["--cache-ram", "0"]));
+        assert!(args
+            .windows(2)
+            .any(|window| window == ["--log-verbosity", "1"]));
     }
 
     #[test]
@@ -157,9 +203,11 @@ mod tests {
     }
 
     #[test]
-    fn includes_parallel_and_http_threads_when_set() {
+    fn includes_parallel_batch_and_http_threads_when_set() {
         let config = AppConfig {
             parallel_slots: 4,
+            batch_size: 2048,
+            ubatch_size: 1024,
             http_threads: 6,
             ..AppConfig::default()
         };
@@ -171,6 +219,54 @@ mod tests {
         assert!(args
             .windows(2)
             .any(|window| window == ["--threads-http", "6"]));
+        assert!(args
+            .windows(2)
+            .any(|window| window == ["--batch-size", "2048"]));
+        assert!(args
+            .windows(2)
+            .any(|window| window == ["--ubatch-size", "1024"]));
+    }
+
+    #[test]
+    fn all_gpu_layers_disables_automatic_fit() {
+        let config = AppConfig {
+            gpu_layers: "all".to_string(),
+            ..AppConfig::default()
+        };
+
+        let args = build_llama_server_args(&config, Path::new("model.gguf"))
+            .expect("valid config should build llama-server args");
+
+        assert!(args
+            .windows(2)
+            .any(|window| window == ["--n-gpu-layers", "all"]));
+        assert!(args.windows(2).any(|window| window == ["--fit", "off"]));
+    }
+
+    #[test]
+    fn service_batch_settings_override_shared_defaults() {
+        let mut rerank = ServiceConfig::new(true, 9001, String::new());
+        rerank.parallel_slots = 8;
+        rerank.batch_size = 2048;
+        rerank.ubatch_size = 2048;
+        let config = AppConfig {
+            rerank,
+            parallel_slots: 4,
+            batch_size: 512,
+            ubatch_size: 512,
+            ..AppConfig::default()
+        };
+
+        let args = build_llama_server_args(&config, Path::new("model.gguf"))
+            .expect("valid config should build llama-server args");
+
+        assert!(args.windows(2).any(|window| window == ["--parallel", "8"]));
+        assert!(args
+            .windows(2)
+            .any(|window| window == ["--batch-size", "2048"]));
+        assert!(args
+            .windows(2)
+            .any(|window| window == ["--ubatch-size", "2048"]));
     }
 
     #[test]
@@ -212,6 +308,10 @@ mod tests {
                 "--port",
                 "9002",
                 "--no-webui",
+                "--cache-ram",
+                "0",
+                "--log-verbosity",
+                "1",
                 "--n-gpu-layers",
                 "auto",
             ]

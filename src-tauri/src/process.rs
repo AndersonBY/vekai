@@ -1,6 +1,6 @@
 use crate::config::AppConfig;
 use crate::llama_args::build_service_llama_server_args_for_endpoint;
-use crate::logging::{append_log, LogPaths};
+use crate::logging::{append_log, prepare_server_log, LogPaths};
 use crate::protocol_proxy::{
     plan_protocol_launch, start_protocol_proxy, ProtocolProxyConfig, ProtocolProxyHandle,
 };
@@ -22,7 +22,7 @@ use tokio::time::{sleep, Duration, Instant};
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(90);
 const HEALTH_REQUEST_TIMEOUT: Duration = Duration::from_millis(250);
-const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(750);
+const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const EXIT_MONITOR_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const CRASH_RESTART_WINDOW: Duration = Duration::from_secs(60);
 
@@ -291,7 +291,10 @@ async fn start_with_context_attempt(
         .await;
         append_log(&logs.app_log, &starting_message)?;
 
-        let child = match spawn_server(&context.runtime, &launch.args) {
+        let server_log = logs.server_log_for(supervisor.kind).to_path_buf();
+        let child = match prepare_server_log(&server_log)
+            .and_then(|_| spawn_server(&context.runtime, &launch.args))
+        {
             Ok(child) => child,
             Err(error) => {
                 fail_start(supervisor.kind, &state, &logs, &error.to_string()).await?;
@@ -299,13 +302,8 @@ async fn start_with_context_attempt(
             }
         };
 
-        let child_generation = store_child_with_log_readers(
-            supervisor,
-            child,
-            state.clone(),
-            logs.server_log_for(supervisor.kind).to_path_buf(),
-        )
-        .await?;
+        let child_generation =
+            store_child_with_log_readers(supervisor, child, state.clone(), server_log).await?;
         remember_restart_context(supervisor, context.clone(), reason).await;
 
         child_generation

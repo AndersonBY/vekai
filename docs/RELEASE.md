@@ -113,12 +113,15 @@ Windows x64 release workflow 必须先运行 `scripts\build-fastpath.ps1`。side
 ```powershell
 git diff --check
 powershell -ExecutionPolicy Bypass -File scripts\prepare-bundled-runtime.ps1
-powershell -ExecutionPolicy Bypass -File scripts\build-fastpath.ps1
 npm run verify:icons
 npm run build
 cargo test --manifest-path src-tauri/Cargo.toml
+cargo test --release --locked --manifest-path src-fastpath/Cargo.toml
+powershell -ExecutionPolicy Bypass -File scripts\build-fastpath.ps1
 npm run tauri:build
 ```
+
+`src-fastpath` 测试和构建仅适用于 Windows x64；其他平台跳过这两项。
 
 如果只改文档，可以只跑 `git diff --check` 并说明没有重打包。
 
@@ -151,7 +154,9 @@ git push origin v0.1.8
 
 如果需要重跑某个已存在 tag 的发布，可以在 GitHub Actions 页面手动运行 `Release` 工作流并输入 tag，例如 `v0.1.8`。工作流会覆盖同名 Release asset。
 
-工作流也监听 `master` 分支 push，用于让新仓库在 GitHub Actions 页面注册工作流；发布构建 job 只会在 tag push 或手动输入 tag 时运行。
+工作流也监听 `master` 分支 push，并使用与正式 Release 相同的六平台矩阵构建安装包。构建结果只上传到该次 GitHub Actions run 的 artifacts，不创建或修改 GitHub Release；这样可以在打 tag 前发现平台打包回归。只有 tag push 或手动输入 tag 时才会创建或更新 GitHub Release。
+
+Windows x64 job 会在 Tauri 打包前运行 `src-fastpath` release 模式测试并生成 sidecar；其他平台跳过 fastpath sidecar，但仍会把仓库中的 ONNX 瘦图作为普通资源打进安装包。
 
 Linux `.deb` 包会额外包含服务模式说明文件：
 

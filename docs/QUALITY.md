@@ -10,9 +10,12 @@ powershell -ExecutionPolicy Bypass -File scripts\prepare-bundled-runtime.ps1
 npm run verify:icons
 npm run build
 cargo test --manifest-path src-tauri/Cargo.toml
+cargo test --release --locked --manifest-path src-fastpath/Cargo.toml
 powershell -ExecutionPolicy Bypass -File scripts\build-fastpath.ps1
 npm run tauri:build
 ```
+
+`src-fastpath` 测试和构建仅适用于 Windows x64；其他平台跳过这两项。
 
 ## 分层验证
 

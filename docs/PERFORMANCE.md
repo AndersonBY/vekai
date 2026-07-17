@@ -48,14 +48,23 @@ Rerank 的 CUDA 收益较小：1/8/32 条约快 12%–21%，64 条复测为 CUDA
 
 CUDA Graph 在 32/64 条时没有收益，还要求固定地址 I/O，并使长文本需要第二个 session。最终生产实现因此使用一个普通 ORT CUDA session，并只 padding 到当前微批最长文本。短文本通过真实 HTTP、丢弃响应体的 `curl.exe` P50 为：
 
-| 条数 | sidecar HTTP P50 |
+| 条数 | Windows x64 sidecar HTTP P50 |
 | ---: | ---: |
 | 1 | 23.2 ms |
 | 8 | 31.9 ms |
 | 32 | 52.6 ms |
 | 64 | 63.0 ms |
 
-这些 HTTP 数字包含 Rust tokenizer、750 微秒微批窗口、GPU 推理、FP32 JSON 序列化和 loopback 传输。单 session release 热启动约 `3.2 s`，本机显存增量约 `2188 MiB`；与 Rerank llama CUDA 同时启动时总增量约 `2607 MiB`。强制终止 sidecar 后，Embedding 在约 `2.50 s` 内自动切到 llama CUDA，同端口请求继续成功。
+Linux x64 使用约 30 token/条的固定文本，在 Docker Desktop 端口转发外侧测得：
+
+| 条数 | Linux x64 Docker HTTP P50 |
+| ---: | ---: |
+| 1 | 28.8 ms |
+| 8 | 40.7 ms |
+| 32 | 68.4 ms |
+| 64 | 128.1 ms |
+
+这些 HTTP 数字包含 Rust tokenizer、750 微秒微批窗口、GPU 推理、FP32 JSON 序列化和 loopback 传输；Linux 表还包含 Docker Desktop 端口转发。Windows 单 session release 热启动约 `3.2 s`，本机显存增量约 `2188 MiB`；Linux Docker 从 ORT 初始化到预热完成约 `3.87 s`。与 Rerank llama CUDA 同时启动时 Windows 总显存增量约 `2607 MiB`。强制终止 sidecar 后，Embedding 在约 `2.50 s` 内自动切到 llama CUDA，同端口请求继续成功。
 
 ## Profiler 结论
 
@@ -81,6 +90,6 @@ Nsight Systems 对 64 条 eager FP16 热区采样：
 
 ## 资产和回退
 
-`scripts/download-fastpath.ps1` 固定并校验 ONNX Runtime `1.23.0`、CUDA runtime `12.1.105`、cuBLAS `12.1.3.1`、cuFFT `11.0.2.54` 和 cuDNN `9.1.0.70`。只抽取进程实际需要的 10 个 DLL，不安装 Python/PyTorch。应用启动只校验 manifest 常量和大文件大小，并哈希 562 KiB 瘦图，避免每次启动扫描约 2.4 GB 资产。
+`scripts/download-fastpath.ps1` 固定并校验 ONNX Runtime `1.23.0`、CUDA runtime `12.1.105`、cuBLAS `12.1.3.1`、cuFFT `11.0.2.54`、Linux cuRAND `10.3.2.106` 和 cuDNN `9.1.0.70`。Windows 从对应 wheel 抽取 10 个 DLL；Linux 从 ONNX Runtime 官方 GPU tarball 和 NVIDIA wheel 抽取 11 个 `.so`，ORT provider 额外直接依赖 cuRAND。两者都不安装 Python/PyTorch。manifest schema 包含 `windows-x64`/`linux-x64` 平台标识，禁止跨平台复用动态库。应用启动只校验 manifest 常量和大文件大小，并哈希 562 KiB 瘦图，避免每次启动扫描约 2.4 GB 资产。
 
-快路径仅在 Windows x64、选择 Qwen3-Embedding-0.6B GGUF、manifest 完整且 sidecar 资源存在时启用。任何条件不满足都直接使用 llama.cpp；sidecar 启动失败、健康超时或运行期退出也会自动回退。
+快路径仅在 Windows/Linux x64、选择 Qwen3-Embedding-0.6B GGUF、当前平台 manifest 完整且原生 sidecar 资源存在时启用。CUDA execution provider 使用严格失败模式，禁止静默回退 CPU 后继续报告 `ort_cuda`。任何条件不满足都直接使用 llama.cpp；sidecar 启动失败、健康超时或运行期退出也会自动回退。

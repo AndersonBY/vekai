@@ -17,7 +17,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build-fastpath.ps1
 npm run tauri:build
 ```
 
-`build-fastpath.ps1` 仅支持 Windows x64；其他平台直接运行 `npm run tauri:build`。Tauri 命令会先执行前端构建，再构建 release 产物。
+`build-fastpath.ps1` 支持 Windows x64 和 Linux x64；其他平台直接运行 `npm run tauri:build`。Tauri 命令会先执行前端构建，再构建 release 产物。
 
 ## 主要产物
 
@@ -96,17 +96,25 @@ models\Qwen3-Embedding-0.6B-Q8_0.gguf
 
 不要把代码改成硬编码某个开发机路径。
 
-## Windows Embedding 快路径
+## Windows/Linux Embedding 快路径
 
-Windows x64 安装包包含约 5 MB 的 Rust sidecar 和 562 KiB ONNX 瘦图，不包含 FP16 外部权重或 GPU DLL。NVIDIA 用户在源码/交付脚本目录运行：
+Windows x64 和 Linux x64 安装包包含约 5 MB 的原生 Rust sidecar 和 562 KiB ONNX 瘦图，不包含 FP16 外部权重或 GPU 动态库。NVIDIA 用户在源码/交付脚本目录运行：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\download-fastpath.ps1
 ```
 
-脚本把校验后的资产安装到 `%LOCALAPPDATA%\Vekai\fastpath`，并在所有文件成功后最后写 `manifest.json`。wheel 只作为下载容器，默认在成功后删除；安装目录不包含 Python、PyTorch 或 TensorRT。Vekai 仅在选择 `Qwen3-Embedding-0.6B*.gguf` 时自动启用，其他模型和其他平台继续使用 llama.cpp。
+Linux 使用 PowerShell 7：
 
-Windows x64 release workflow 必须先运行 `scripts\build-fastpath.ps1`。sidecar exe 是生成物，不提交 Git；FP16 权重和 CUDA DLL 也不进入 Git 或安装包。
+```bash
+pwsh -File scripts/download-fastpath.ps1
+```
+
+脚本在 Windows 把资产安装到 `%LOCALAPPDATA%\Vekai\fastpath`，在 Linux 安装到 `$XDG_DATA_HOME/Vekai/fastpath`，未设置时使用 `~/.local/share/Vekai/fastpath`。所有文件成功后最后写平台感知的 `manifest.json`。Windows 使用 wheel 作为下载容器；Linux 的 ORT 使用官方 GPU tarball，NVIDIA 库使用 wheel。下载归档默认在成功后删除，安装目录不包含 Python、PyTorch 或 TensorRT。Vekai 仅在选择 `Qwen3-Embedding-0.6B*.gguf` 时自动启用，其他模型和其他平台继续使用 llama.cpp。
+
+平台感知 manifest 使用 schema 2。已有 Windows fastpath 用户升级后需要重新运行下载脚本生成新 manifest；旧 schema 或其他平台的 manifest 会被拒绝并安全回退 llama.cpp。
+
+Windows x64 和 Ubuntu x64 release workflow 必须先运行 `scripts\build-fastpath.ps1`。sidecar 是生成物，不提交 Git；FP16 权重和 CUDA 动态库也不进入 Git 或安装包。
 
 ## 打包前检查
 
@@ -121,7 +129,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build-fastpath.ps1
 npm run tauri:build
 ```
 
-`src-fastpath` 测试和构建仅适用于 Windows x64；其他平台跳过这两项。
+`src-fastpath` 测试和构建适用于 Windows x64 和 Linux x64；其他平台跳过这两项。
 
 如果只改文档，可以只跑 `git diff --check` 并说明没有重打包。
 
@@ -156,7 +164,7 @@ git push origin v0.1.8
 
 工作流也监听 `master` 分支 push，并使用与正式 Release 相同的六平台矩阵构建安装包。构建结果只上传到该次 GitHub Actions run 的 artifacts，不创建或修改 GitHub Release；这样可以在打 tag 前发现平台打包回归。只有 tag push 或手动输入 tag 时才会创建或更新 GitHub Release。
 
-Windows x64 job 会在 Tauri 打包前运行 `src-fastpath` release 模式测试并生成 sidecar；其他平台跳过 fastpath sidecar，但仍会把仓库中的 ONNX 瘦图作为普通资源打进安装包。
+Windows x64 和 Ubuntu x64 job 会在 Tauri 打包前运行 `src-fastpath` release 模式测试并生成对应平台 sidecar；其他平台跳过 fastpath sidecar，但仍会把仓库中的 ONNX 瘦图作为普通资源打进安装包。
 
 Linux `.deb` 包会额外包含服务模式说明文件：
 

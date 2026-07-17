@@ -15,7 +15,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build-fastpath.ps1
 npm run tauri:build
 ```
 
-`src-fastpath` 测试和构建仅适用于 Windows x64；其他平台跳过这两项。
+`src-fastpath` 测试和构建适用于 Windows x64 和 Linux x64；其他平台跳过这两项。Linux 变更还应在 NVIDIA Docker 环境验证 `/health` 和至少一次 1024 维 Embedding 请求。
 
 ## 分层验证
 
@@ -57,7 +57,7 @@ npm run tauri:build
 | 端口 | Rerank 默认 `8012`，Embedding 默认 `8013`。 |
 | UI 语言 | 默认中文，允许切换英文。 |
 | 模型路径 | 用户通过文件选择器选择完整 `.gguf` 路径，不写死模型路径。 |
-| 大资产 | llama.cpp runtime archive、`.gguf`、FP16 外部权重和 GPU DLL 不进 Git；fastpath 只提交瘦图和源码，sidecar exe 是打包前生成物。 |
+| 大资产 | llama.cpp runtime archive、`.gguf`、FP16 外部权重和 GPU 动态库不进 Git；fastpath 只提交瘦图和源码，原生 sidecar 是打包前生成物。 |
 | 托盘体验 | 关闭设置窗口应询问最小化到托盘还是退出。 |
 | 原生协议 | Rerank `/v1/rerank`，Embedding `/v1/embeddings`。 |
 | 非原生协议 | 通过本地代理转换，不直接暴露内部 llama.cpp 端口。 |
@@ -71,7 +71,8 @@ npm run tauri:build
 - 打包后缺前端资源或包内 runtime archive。
 - 新图标是 16-bit PNG，导致 macOS Tauri 打包失败。
 - 把 `downloads\` 或 `models\*.gguf` 误提交进 Git。
-- 把 fastpath wheel、外部权重、GPU DLL、sidecar exe 或任意 `target\` 目录误提交进 Git。
+- 把 fastpath 下载归档、外部权重、GPU 动态库、sidecar 二进制或任意 `target\` 目录误提交进 Git。
+- Linux fastpath 只设置 `PATH` 而没有设置 `LD_LIBRARY_PATH`，导致 ORT CUDA provider 无法加载私有 `.so`。
 - ORT CUDA provider 静默回退 CPU，但健康检查仍被误判为 fastpath 可用。
 - 日志写到旧目录。
 - 协议下拉有选项，但 Rust 配置白名单不接受。

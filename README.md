@@ -13,7 +13,7 @@ Vekai is a Windows tray application that also provides Linux GUI/CLI service mod
 - Runs local Embedding and Rerank services at the same time.
 - Lets users choose any `.gguf` model file path instead of requiring a fixed model directory.
 - Provides `scripts\download-assets.ps1` to download default GGUF models; source packaging and runtime override flows can also download the latest matching llama.cpp runtime.
-- Offers an optional ONNX Runtime CUDA Embedding fast path on NVIDIA Windows x64, with automatic llama.cpp fallback when assets are absent or the sidecar fails.
+- Offers an optional ONNX Runtime CUDA Embedding fast path on NVIDIA Windows/Linux x64, with automatic llama.cpp fallback when assets are absent or the sidecar fails.
 - Supports native llama.cpp endpoints plus SiliconFlow, Cohere, Jina, Voyage, and custom JSON HTTP compatible response shapes.
 - Starts with a Chinese UI by default and includes an English language switch.
 - Stays in the Windows system tray with actions for settings, logs, and quit.
@@ -51,11 +51,13 @@ On NVIDIA Windows x64 machines, install the CUDA 12.4 accelerated runtime below 
 powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1 -WindowsBackend cuda -SkipModels
 ```
 
-Qwen3-Embedding-0.6B can use the faster FP16 ONNX CUDA path. The installer script pins and verifies the model, ONNX Runtime, CUDA, cuBLAS, cuFFT, and cuDNN assets. Restart the services after it completes:
+Qwen3-Embedding-0.6B on Windows/Linux x64 can use the faster FP16 ONNX CUDA path. The installer script pins and verifies the platform-specific model, ONNX Runtime, CUDA, cuBLAS, cuFFT, cuRAND, and cuDNN assets. Restart the services after it completes:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\download-fastpath.ps1
 ```
+
+On Linux, run `pwsh -File scripts/download-fastpath.ps1`. Assets are installed under `$XDG_DATA_HOME/Vekai/fastpath`, or `~/.local/share/Vekai/fastpath` when `XDG_DATA_HOME` is unset.
 
 The fast path activates only when the selected file matches `Qwen3-Embedding-0.6B*.gguf`; endpoints and protocols do not change. A `/health` response with `backend: ort_cuda` confirms it is active. Vekai starts llama.cpp on the same port if the sidecar cannot start, misses its health deadline, or exits while running.
 
@@ -168,7 +170,8 @@ curl.exe http://127.0.0.1:8013/health
 | Logs | `%LOCALAPPDATA%\Vekai\logs` |
 | Runtime source | Bundled package `downloads/`; overridable via `%LOCALAPPDATA%\Vekai\downloads` or an exe-adjacent `downloads\` folder |
 | Extracted runtime | `%LOCALAPPDATA%\Vekai\runtimes` |
-| Embedding fast path assets | `%LOCALAPPDATA%\Vekai\fastpath` |
+| Windows Embedding fast path assets | `%LOCALAPPDATA%\Vekai\fastpath` |
+| Linux Embedding fast path assets | `$XDG_DATA_HOME/Vekai/fastpath` or `~/.local/share/Vekai/fastpath` |
 | Default asset manifest | `scripts\assets.json` |
 
 Older development builds may have created `%LOCALAPPDATA%\LocalRerankServer\logs`. Current builds no longer write to that old directory.
@@ -219,7 +222,7 @@ The repository may also contain a copied delivery folder:
 - `release\Vekai 0.1.8\Vekai.exe`
 - `release\Vekai 0.1.8\Vekai_0.1.8_x64-setup.exe`
 
-The installer and exe include frontend assets, the matching llama.cpp runtime archive, and the small Windows x64 fast path sidecar/ONNX graph. GGUF models, FP16 weights, and GPU DLLs are not bundled. In a source checkout, run `scripts\download-assets.ps1 -SkipRuntime` to download default test models into `models\`.
+The installer and exe include frontend assets, the matching llama.cpp runtime archive, and the small native Windows/Linux x64 fast path sidecar/ONNX graph. GGUF models, FP16 weights, and GPU dynamic libraries are not bundled. In a source checkout, run `scripts\download-assets.ps1 -SkipRuntime` to download default test models into `models\`.
 
 ## Troubleshooting
 
@@ -241,7 +244,7 @@ The app starts local HTTP services. Keep the host as `127.0.0.1` for local-only 
 
 **CUDA, Vulkan, or GPU errors**
 
-CUDA acceleration is limited to NVIDIA Windows x64 and requires a recent NVIDIA driver. Vekai falls back to Vulkan when either the CUDA main archive or its companion runtime is absent. To isolate remaining GPU issues, set GPU layers to `0`, verify CPU execution, then switch back to `auto`, `all`, or a specific layer count.
+Automatic llama.cpp CUDA runtime selection remains limited to NVIDIA Windows x64. The ORT Embedding fast path supports NVIDIA Windows/Linux x64; both require a recent NVIDIA driver. Vekai falls back to Vulkan when either Windows CUDA archive is absent, and falls back to llama.cpp when fast path assets are incomplete or the sidecar fails. To isolate remaining GPU issues, set GPU layers to `0`, verify CPU execution, then switch back to `auto`, `all`, or a specific layer count.
 
 **New logs are missing**
 

@@ -39,7 +39,7 @@ struct Config {
     port: u16,
     model: PathBuf,
     tokenizer: PathBuf,
-    ort_dll: PathBuf,
+    ort_library: PathBuf,
     max_sequence_length: usize,
 }
 
@@ -53,7 +53,7 @@ impl Config {
             port: args.opt_value_from_str("--port")?.unwrap_or(8013),
             model: args.value_from_os_str("--model", parse_path)?,
             tokenizer: args.value_from_os_str("--tokenizer", parse_path)?,
-            ort_dll: args.value_from_os_str("--ort-dll", parse_path)?,
+            ort_library: args.value_from_os_str("--ort-library", parse_path)?,
             max_sequence_length: args
                 .opt_value_from_str("--max-sequence-length")?
                 .unwrap_or(8192),
@@ -85,7 +85,7 @@ struct Engine {
 impl Engine {
     fn load(config: &Config) -> Result<Self> {
         eprintln!("fastpath stage=ort-init");
-        let _ = ort::init_from(&config.ort_dll)?
+        let _ = ort::init_from(&config.ort_library)?
             .with_name("vekai-embedding-fastpath")
             .commit();
 
@@ -208,7 +208,8 @@ fn build_session(model: &Path) -> Result<Session> {
         .with_execution_providers([ep::CUDA::default()
             .with_device_id(0)
             .with_tf32(true)
-            .build()])
+            .build()
+            .error_on_failure()])
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     builder
         .commit_from_file(model)

@@ -6,18 +6,18 @@ use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
-const MANIFEST_SCHEMA_VERSION: u32 = 1;
+const MANIFEST_SCHEMA_VERSION: u32 = 2;
 const MODEL_REVISION: &str = "c25a394dd583836952667c12f008335071b3f43d";
 const ONNXRUNTIME_VERSION: &str = "1.23.0";
 const CUDA_RUNTIME_VERSION: &str = "12.1.105";
 const CUBLAS_VERSION: &str = "12.1.3.1";
 const CUFFT_VERSION: &str = "11.0.2.54";
+const CURAND_VERSION: &str = "10.3.2.106";
 const CUDNN_VERSION: &str = "9.1.0.70";
 
 const GRAPH_FILE_NAME: &str = "qwen3-embedding-0.6b-fp16.onnx";
 const GRAPH_SIZE: u64 = 575_769;
 const GRAPH_SHA256: &str = "40bb4922e22c9d9fdfef69fe71db29be0b41715e88d9442a902df2afaef6fae4";
-const SIDECAR_FILE_NAME: &str = "vekai-embedding-fastpath.exe";
 
 const WEIGHTS_PATH: &str = "model/model_fp16.onnx_data";
 const WEIGHTS_SIZE: u64 = 1_199_927_296;
@@ -26,7 +26,8 @@ const TOKENIZER_PATH: &str = "model/tokenizer.json";
 const TOKENIZER_SIZE: u64 = 11_423_705;
 const TOKENIZER_SHA256: &str = "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a";
 
-const REQUIRED_RUNTIME_FILES: [&str; 10] = [
+#[cfg(any(test, all(target_os = "windows", target_arch = "x86_64")))]
+const WINDOWS_X64_RUNTIME_FILES: [&str; 10] = [
     "onnxruntime.dll",
     "onnxruntime_providers_shared.dll",
     "onnxruntime_providers_cuda.dll",
@@ -39,23 +40,64 @@ const REQUIRED_RUNTIME_FILES: [&str; 10] = [
     "cudnn_ops64_9.dll",
 ];
 
+#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
+const LINUX_X64_RUNTIME_FILES: [&str; 11] = [
+    "libonnxruntime.so.1.23.0",
+    "libonnxruntime_providers_shared.so",
+    "libonnxruntime_providers_cuda.so",
+    "libcudart.so.12",
+    "libcublas.so.12",
+    "libcublasLt.so.12",
+    "libcurand.so.10",
+    "libcufft.so.11",
+    "libcudnn.so.9",
+    "libcudnn_graph.so.9",
+    "libcudnn_ops.so.9",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FastPathPlatform {
+    manifest_id: &'static str,
+    sidecar_file_name: &'static str,
+    ort_library_file_name: &'static str,
+    required_runtime_files: &'static [&'static str],
+}
+
+#[cfg(any(test, all(target_os = "windows", target_arch = "x86_64")))]
+const WINDOWS_X64_PLATFORM: FastPathPlatform = FastPathPlatform {
+    manifest_id: "windows-x64",
+    sidecar_file_name: "vekai-embedding-fastpath.exe",
+    ort_library_file_name: "onnxruntime.dll",
+    required_runtime_files: &WINDOWS_X64_RUNTIME_FILES,
+};
+
+#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
+const LINUX_X64_PLATFORM: FastPathPlatform = FastPathPlatform {
+    manifest_id: "linux-x64",
+    sidecar_file_name: "vekai-embedding-fastpath",
+    ort_library_file_name: "libonnxruntime.so.1.23.0",
+    required_runtime_files: &LINUX_X64_RUNTIME_FILES,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FastPathLayout {
     pub server_exe: PathBuf,
     pub runtime_dir: PathBuf,
     pub model_path: PathBuf,
     pub tokenizer_path: PathBuf,
-    pub ort_dll: PathBuf,
+    pub ort_library: PathBuf,
 }
 
 #[derive(Debug, Deserialize)]
 struct FastPathManifest {
     schema_version: u32,
+    platform: String,
     model_revision: String,
     onnxruntime_version: String,
     cuda_runtime_version: String,
     cublas_version: String,
     cufft_version: String,
+    curand_version: String,
     cudnn_version: String,
     weights: ManifestFile,
     tokenizer: ManifestFile,
@@ -75,9 +117,10 @@ pub fn discover_embedding_fastpath(
     download_dirs: &[PathBuf],
     selected_model: &Path,
 ) -> anyhow::Result<Option<FastPathLayout>> {
-    if !cfg!(all(target_os = "windows", target_arch = "x86_64"))
-        || !is_supported_embedding_model(selected_model)
-    {
+    let Some(platform) = current_fastpath_platform() else {
+        return Ok(None);
+    };
+    if !is_supported_embedding_model(selected_model) {
         return Ok(None);
     }
 
@@ -91,11 +134,11 @@ pub fn discover_embedding_fastpath(
     })?;
     let manifest: FastPathManifest = serde_json::from_str(&manifest_contents)
         .with_context(|| format!("failed to parse {}", manifest_path.display()))?;
-    validate_manifest(&root, &manifest)?;
+    validate_manifest(&root, &manifest, platform)?;
 
-    let resource_dir = find_resource_dir(exe_dir, download_dirs)?;
-    let server_exe = resource_dir.join(SIDECAR_FILE_NAME);
-    validate_nonempty_file(&server_exe)?;
+    let resource_dir = find_resource_dir(exe_dir, download_dirs, platform)?;
+    let server_exe = resource_dir.join(platform.sidecar_file_name);
+    validate_executable_file(&server_exe)?;
 
     let resource_graph = resource_dir.join(GRAPH_FILE_NAME);
     validate_file_hash(&resource_graph, GRAPH_SIZE, GRAPH_SHA256)?;
@@ -115,11 +158,24 @@ pub fn discover_embedding_fastpath(
     let runtime_dir = root.join("runtime");
     Ok(Some(FastPathLayout {
         server_exe,
-        ort_dll: runtime_dir.join("onnxruntime.dll"),
+        ort_library: runtime_dir.join(platform.ort_library_file_name),
         runtime_dir,
         model_path,
         tokenizer_path: root.join(TOKENIZER_PATH),
     }))
+}
+
+fn current_fastpath_platform() -> Option<&'static FastPathPlatform> {
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    {
+        return Some(&WINDOWS_X64_PLATFORM);
+    }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        return Some(&LINUX_X64_PLATFORM);
+    }
+    #[allow(unreachable_code)]
+    None
 }
 
 fn is_supported_embedding_model(path: &Path) -> bool {
@@ -132,13 +188,19 @@ fn is_supported_embedding_model(path: &Path) -> bool {
             .is_some_and(|name| name.to_ascii_lowercase().contains("qwen3-embedding-0.6b"))
 }
 
-fn validate_manifest(root: &Path, manifest: &FastPathManifest) -> anyhow::Result<()> {
+fn validate_manifest(
+    root: &Path,
+    manifest: &FastPathManifest,
+    platform: &FastPathPlatform,
+) -> anyhow::Result<()> {
     if manifest.schema_version != MANIFEST_SCHEMA_VERSION
+        || manifest.platform != platform.manifest_id
         || manifest.model_revision != MODEL_REVISION
         || manifest.onnxruntime_version != ONNXRUNTIME_VERSION
         || manifest.cuda_runtime_version != CUDA_RUNTIME_VERSION
         || manifest.cublas_version != CUBLAS_VERSION
         || manifest.cufft_version != CUFFT_VERSION
+        || manifest.curand_version != CURAND_VERSION
         || manifest.cudnn_version != CUDNN_VERSION
     {
         bail!("embedding fast path manifest versions do not match this Vekai build");
@@ -164,7 +226,7 @@ fn validate_manifest(root: &Path, manifest: &FastPathManifest) -> anyhow::Result
         .iter()
         .map(|file| (file.path.as_str(), file))
         .collect::<HashMap<_, _>>();
-    for name in REQUIRED_RUNTIME_FILES {
+    for name in platform.required_runtime_files {
         let manifest_path = format!("runtime/{name}");
         let file = runtime_files
             .get(manifest_path.as_str())
@@ -211,7 +273,11 @@ fn validate_manifest_file_metadata(root: &Path, file: &ManifestFile) -> anyhow::
     Ok(())
 }
 
-fn find_resource_dir(exe_dir: &Path, download_dirs: &[PathBuf]) -> anyhow::Result<PathBuf> {
+fn find_resource_dir(
+    exe_dir: &Path,
+    download_dirs: &[PathBuf],
+    platform: &FastPathPlatform,
+) -> anyhow::Result<PathBuf> {
     let mut candidates = vec![exe_dir.join("fastpath")];
     candidates.extend(
         download_dirs
@@ -224,17 +290,24 @@ fn find_resource_dir(exe_dir: &Path, download_dirs: &[PathBuf]) -> anyhow::Resul
     }
     candidates
         .into_iter()
-        .find(|dir| dir.join(SIDECAR_FILE_NAME).is_file() && dir.join(GRAPH_FILE_NAME).is_file())
+        .find(|dir| {
+            dir.join(platform.sidecar_file_name).is_file() && dir.join(GRAPH_FILE_NAME).is_file()
+        })
         .ok_or_else(|| {
             anyhow!(
-                "embedding fast path sidecar resources are missing; run scripts\\build-fastpath.ps1"
+                "embedding fast path sidecar resources are missing; run scripts/build-fastpath.ps1"
             )
         })
 }
 
 fn safe_relative_path(value: &str) -> anyhow::Result<PathBuf> {
+    let bytes = value.as_bytes();
+    let has_windows_drive_prefix =
+        bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
     let path = Path::new(value);
     if path.as_os_str().is_empty()
+        || has_windows_drive_prefix
+        || value.contains('\\')
         || path
             .components()
             .any(|component| !matches!(component, Component::Normal(_)))
@@ -251,6 +324,27 @@ fn validate_nonempty_file(path: &Path) -> anyhow::Result<()> {
         .len();
     if size == 0 {
         bail!("embedding fast path resource is empty: {}", path.display());
+    }
+    Ok(())
+}
+
+fn validate_executable_file(path: &Path) -> anyhow::Result<()> {
+    validate_nonempty_file(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mode = path
+            .metadata()
+            .with_context(|| format!("failed to inspect {}", path.display()))?
+            .permissions()
+            .mode();
+        if mode & 0o111 == 0 {
+            bail!(
+                "embedding fast path sidecar is not executable: {}",
+                path.display()
+            );
+        }
     }
     Ok(())
 }
@@ -313,8 +407,12 @@ mod tests {
     #[test]
     fn manifest_paths_cannot_escape_asset_root() {
         assert!(safe_relative_path("runtime/onnxruntime.dll").is_ok());
+        assert!(safe_relative_path("runtime/libonnxruntime.so.1.23.0").is_ok());
         assert!(safe_relative_path("../onnxruntime.dll").is_err());
         assert!(safe_relative_path("C:/onnxruntime.dll").is_err());
+        assert!(safe_relative_path(r"C:\onnxruntime.dll").is_err());
+        assert!(safe_relative_path(r"\\server\onnxruntime.dll").is_err());
+        assert!(safe_relative_path(r"runtime\onnxruntime.dll").is_err());
         assert!(safe_relative_path("").is_err());
     }
 
@@ -323,5 +421,63 @@ mod tests {
         assert!(is_sha256(GRAPH_SHA256));
         assert!(!is_sha256("abc"));
         assert!(!is_sha256(&"z".repeat(64)));
+    }
+
+    #[test]
+    fn platform_specs_use_native_sidecar_and_ort_names() {
+        assert_eq!(WINDOWS_X64_PLATFORM.manifest_id, "windows-x64");
+        assert!(WINDOWS_X64_PLATFORM.sidecar_file_name.ends_with(".exe"));
+        assert_eq!(
+            WINDOWS_X64_PLATFORM.ort_library_file_name,
+            "onnxruntime.dll"
+        );
+        assert_eq!(WINDOWS_X64_PLATFORM.required_runtime_files.len(), 10);
+
+        assert_eq!(LINUX_X64_PLATFORM.manifest_id, "linux-x64");
+        assert_eq!(
+            LINUX_X64_PLATFORM.sidecar_file_name,
+            "vekai-embedding-fastpath"
+        );
+        assert_eq!(
+            LINUX_X64_PLATFORM.ort_library_file_name,
+            "libonnxruntime.so.1.23.0"
+        );
+        assert_eq!(LINUX_X64_PLATFORM.required_runtime_files.len(), 11);
+    }
+
+    #[test]
+    fn manifest_schema_and_platform_must_match_the_current_build() {
+        let manifest = FastPathManifest {
+            schema_version: MANIFEST_SCHEMA_VERSION,
+            platform: LINUX_X64_PLATFORM.manifest_id.to_string(),
+            model_revision: MODEL_REVISION.to_string(),
+            onnxruntime_version: ONNXRUNTIME_VERSION.to_string(),
+            cuda_runtime_version: CUDA_RUNTIME_VERSION.to_string(),
+            cublas_version: CUBLAS_VERSION.to_string(),
+            cufft_version: CUFFT_VERSION.to_string(),
+            curand_version: CURAND_VERSION.to_string(),
+            cudnn_version: CUDNN_VERSION.to_string(),
+            weights: ManifestFile {
+                path: WEIGHTS_PATH.to_string(),
+                size: WEIGHTS_SIZE,
+                sha256: WEIGHTS_SHA256.to_string(),
+            },
+            tokenizer: ManifestFile {
+                path: TOKENIZER_PATH.to_string(),
+                size: TOKENIZER_SIZE,
+                sha256: TOKENIZER_SHA256.to_string(),
+            },
+            runtime_files: Vec::new(),
+        };
+
+        let platform_error = validate_manifest(Path::new("."), &manifest, &WINDOWS_X64_PLATFORM)
+            .expect_err("Linux assets must not be accepted by a Windows build");
+        assert!(platform_error.to_string().contains("versions do not match"));
+
+        let mut old_schema = manifest;
+        old_schema.schema_version -= 1;
+        let schema_error = validate_manifest(Path::new("."), &old_schema, &LINUX_X64_PLATFORM)
+            .expect_err("old manifests must be regenerated");
+        assert!(schema_error.to_string().contains("versions do not match"));
     }
 }

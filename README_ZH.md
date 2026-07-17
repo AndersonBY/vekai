@@ -13,7 +13,7 @@ Vekai 是一个 Windows 托盘应用，也提供 Linux GUI/CLI 服务模式，�
 - 同时管理本地 Embedding 服务和 Rerank 服务。
 - 支持任意 `.gguf` 模型文件路径，不要求模型放在固定目录。
 - 提供 `scripts\download-assets.ps1` 下载默认 GGUF 模型；源码打包和 runtime 覆盖场景也可下载当前平台匹配的最新 llama.cpp 运行时。
-- Windows x64 + NVIDIA 上可选用 ONNX Runtime CUDA Embedding 快路径，资产缺失或进程异常时自动回退 llama.cpp。
+- Windows/Linux x64 + NVIDIA 上可选用 ONNX Runtime CUDA Embedding 快路径，资产缺失或进程异常时自动回退 llama.cpp。
 - 支持 llama.cpp 原生接口，以及兼容 SiliconFlow、Cohere、Jina、Voyage 和自定义 JSON HTTP 风格的响应协议。
 - 中文界面默认启用，也可以在设置页切换英文。
 - Windows 托盘常驻，支持打开设置、打开日志目录和退出程序。
@@ -51,11 +51,13 @@ NVIDIA Windows x64 机器可安装 CUDA 12.4 加速 runtime；下载完成后重
 powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1 -WindowsBackend cuda -SkipModels
 ```
 
-Qwen3-Embedding-0.6B 可进一步安装 FP16 ONNX CUDA 快路径。脚本固定校验模型、ONNX Runtime、CUDA、cuBLAS、cuFFT 和 cuDNN 资产；安装完成后重启服务即可自动启用：
+Windows/Linux x64 的 Qwen3-Embedding-0.6B 可进一步安装 FP16 ONNX CUDA 快路径。脚本固定校验当前平台的模型、ONNX Runtime、CUDA、cuBLAS、cuFFT、cuRAND 和 cuDNN 资产；安装完成后重启服务即可自动启用：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\download-fastpath.ps1
 ```
+
+Linux 使用 `pwsh -File scripts/download-fastpath.ps1`，默认安装到 `$XDG_DATA_HOME/Vekai/fastpath`，未设置时使用 `~/.local/share/Vekai/fastpath`。
 
 快路径只在所选文件名匹配 `Qwen3-Embedding-0.6B*.gguf` 时启用，HTTP 路径和协议保持不变。`/health` 返回 `backend: ort_cuda` 表示正在使用快路径；若 sidecar 启动失败、健康超时或运行期退出，Vekai 会自动在同一端口启动 llama.cpp。
 
@@ -168,7 +170,8 @@ curl.exe http://127.0.0.1:8013/health
 | 日志目录 | `%LOCALAPPDATA%\Vekai\logs` |
 | 运行时来源 | 安装包内置 `downloads/`；可用 `%LOCALAPPDATA%\Vekai\downloads` 或 exe 同级 `downloads\` 覆盖 |
 | 运行时解压目录 | `%LOCALAPPDATA%\Vekai\runtimes` |
-| Embedding 快路径资产 | `%LOCALAPPDATA%\Vekai\fastpath` |
+| Windows Embedding 快路径资产 | `%LOCALAPPDATA%\Vekai\fastpath` |
+| Linux Embedding 快路径资产 | `$XDG_DATA_HOME/Vekai/fastpath` 或 `~/.local/share/Vekai/fastpath` |
 | 默认下载配置 | `scripts\assets.json` |
 
 旧开发版本可能留下 `%LOCALAPPDATA%\LocalRerankServer\logs`，当前应用不会再写入这个旧目录。
@@ -219,7 +222,7 @@ npm run tauri:build
 - `release\Vekai 0.1.8\Vekai.exe`
 - `release\Vekai 0.1.8\Vekai_0.1.8_x64-setup.exe`
 
-安装包和 exe 包含前端资源、对应平台的 llama.cpp runtime archive，以及 Windows x64 的小型 fastpath sidecar/ONNX 图；GGUF、FP16 权重和 GPU DLL 不包含在安装包内。源码仓库中运行 `scripts\download-assets.ps1 -SkipRuntime` 可以把默认测试模型下载到 `models\`。
+安装包和 exe 包含前端资源、对应平台的 llama.cpp runtime archive，以及 Windows/Linux x64 的小型原生 fastpath sidecar/ONNX 图；GGUF、FP16 权重和 GPU 动态库不包含在安装包内。源码仓库中运行 `scripts\download-assets.ps1 -SkipRuntime` 可以把默认测试模型下载到 `models\`。
 
 ## 常见问题
 
@@ -241,7 +244,7 @@ npm run tauri:build
 
 **CUDA、Vulkan 或 GPU 相关错误**
 
-CUDA 加速只用于 NVIDIA Windows x64，并要求较新的 NVIDIA 驱动。CUDA 主包或 companion runtime 不完整时应用会自动使用 Vulkan；仍有问题时，把 GPU 层数改为 `0` 验证 CPU 路径，再按机器能力调回 `auto`、`all` 或具体层数。
+llama.cpp CUDA runtime 自动选择目前只用于 NVIDIA Windows x64；ORT Embedding 快路径支持 NVIDIA Windows/Linux x64，两者都要求较新的 NVIDIA 驱动。Windows CUDA 主包或 companion runtime 不完整时应用会自动使用 Vulkan；fastpath 资产不完整或 sidecar 失败时会自动回退 llama.cpp。仍有问题时，把 GPU 层数改为 `0` 验证 CPU 路径，再按机器能力调回 `auto`、`all` 或具体层数。
 
 **找不到新日志**
 

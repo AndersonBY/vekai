@@ -22,6 +22,7 @@ vite.config.d.ts
 *.log
 *.tmp
 src-tauri/resources/fastpath/vekai-embedding-fastpath.exe
+src-tauri/resources/fastpath/vekai-embedding-fastpath
 __pycache__/
 *.py[cod]
 .DS_Store

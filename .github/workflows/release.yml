@@ -81,9 +81,11 @@ jobs:
             echo "src-tauri/Cargo.toml=$CARGO_VERSION" >&2
             exit 1
           fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "is-release=$IS_RELEASE" >> "$GITHUB_OUTPUT"
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "is-release=$IS_RELEASE"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     name: Build ${{ matrix.name }}
@@ -156,6 +158,7 @@ jobs:
             librsvg2-dev \
             desktop-file-utils \
             xdg-utils \
+            file \
             patchelf
 
       - name: Install dependencies
@@ -170,13 +173,13 @@ jobs:
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --target ${{ matrix.target }}
 
-      - name: Test Windows embedding fast path sidecar
-        if: matrix.name == 'windows-x64'
+      - name: Test embedding fast path sidecar
+        if: matrix.name == 'windows-x64' || matrix.name == 'ubuntu-x64'
         shell: pwsh
         run: cargo test --release --locked --manifest-path src-fastpath/Cargo.toml
 
-      - name: Build Windows embedding fast path sidecar
-        if: matrix.name == 'windows-x64'
+      - name: Build embedding fast path sidecar
+        if: matrix.name == 'windows-x64' || matrix.name == 'ubuntu-x64'
         shell: pwsh
         run: ./scripts/build-fastpath.ps1
 

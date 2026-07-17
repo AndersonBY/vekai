@@ -67,7 +67,13 @@ impl ServiceBackend {
     fn process_name(self) -> &'static str {
         match self {
             Self::Llama => "llama-server.exe",
-            Self::EmbeddingFastPath => "vekai-embedding-fastpath.exe",
+            Self::EmbeddingFastPath => {
+                if cfg!(target_os = "windows") {
+                    "vekai-embedding-fastpath.exe"
+                } else {
+                    "vekai-embedding-fastpath"
+                }
+            }
         }
     }
 }
@@ -584,8 +590,8 @@ fn build_service_launch_with_fastpath(
                     fastpath.model_path.to_string_lossy().into_owned(),
                     "--tokenizer".to_string(),
                     fastpath.tokenizer_path.to_string_lossy().into_owned(),
-                    "--ort-dll".to_string(),
-                    fastpath.ort_dll.to_string_lossy().into_owned(),
+                    "--ort-library".to_string(),
+                    fastpath.ort_library.to_string_lossy().into_owned(),
                 ],
             )
         } else {
@@ -948,14 +954,8 @@ fn spawn_server(launch: &ServiceLaunch) -> anyhow::Result<Child> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(path_prefix) = &launch.path_prefix {
-        let mut paths = vec![path_prefix.clone()];
-        if let Some(current_path) = std::env::var_os("PATH") {
-            paths.extend(std::env::split_paths(&current_path));
-        }
-        command.env(
-            "PATH",
-            std::env::join_paths(paths).context("failed to construct fast path DLL search PATH")?,
-        );
+        let (variable, value) = fastpath_library_path(path_prefix)?;
+        command.env(variable, value);
     }
 
     #[cfg(target_os = "windows")]
@@ -964,6 +964,21 @@ fn spawn_server(launch: &ServiceLaunch) -> anyhow::Result<Child> {
     command
         .spawn()
         .with_context(|| format!("failed to start {}", launch.program.display()))
+}
+
+fn fastpath_library_path(path_prefix: &Path) -> anyhow::Result<(&'static str, std::ffi::OsString)> {
+    let variable = if cfg!(target_os = "linux") {
+        "LD_LIBRARY_PATH"
+    } else {
+        "PATH"
+    };
+    let mut paths = vec![path_prefix.to_path_buf()];
+    if let Some(current_path) = std::env::var_os(variable) {
+        paths.extend(std::env::split_paths(&current_path));
+    }
+    let value = std::env::join_paths(paths)
+        .with_context(|| format!("failed to construct fast path {variable}"))?;
+    Ok((variable, value))
 }
 
 fn spawn_log_reader<T>(kind: ServiceKind, stream: T, log_path: PathBuf, state: SharedAppState)
@@ -1623,7 +1638,7 @@ mod tests {
             runtime_dir: PathBuf::from("C:\\fastpath\\runtime"),
             model_path: PathBuf::from("C:\\fastpath\\model\\embedding.onnx"),
             tokenizer_path: PathBuf::from("C:\\fastpath\\model\\tokenizer.json"),
-            ort_dll: PathBuf::from("C:\\fastpath\\runtime\\onnxruntime.dll"),
+            ort_library: PathBuf::from("C:\\fastpath\\runtime\\onnxruntime.dll"),
         };
 
         let launch = build_service_launch_with_fastpath(
@@ -1637,11 +1652,29 @@ mod tests {
 
         assert_eq!(launch.backend, ServiceBackend::EmbeddingFastPath);
         assert_eq!(launch.program, fastpath.server_exe);
-        assert_eq!(launch.path_prefix.as_deref(), Some(fastpath.runtime_dir.as_path()));
+        assert_eq!(
+            launch.path_prefix.as_deref(),
+            Some(fastpath.runtime_dir.as_path())
+        );
         assert!(launch
             .args
             .windows(2)
-            .any(|window| window == ["--ort-dll", "C:\\fastpath\\runtime\\onnxruntime.dll"]));
+            .any(|window| window == ["--ort-library", "C:\\fastpath\\runtime\\onnxruntime.dll"]));
+    }
+
+    #[test]
+    fn fastpath_library_search_uses_native_loader_variable() {
+        let (variable, value) = fastpath_library_path(Path::new("fastpath-runtime"))
+            .expect("fast path library search path should build");
+        if cfg!(target_os = "linux") {
+            assert_eq!(variable, "LD_LIBRARY_PATH");
+        } else {
+            assert_eq!(variable, "PATH");
+        }
+        assert_eq!(
+            std::env::split_paths(&value).next(),
+            Some(PathBuf::from("fastpath-runtime"))
+        );
     }
 
     #[tokio::test]
@@ -1720,12 +1753,8 @@ mod tests {
             fastpath: None,
         });
 
-        let decision = fastpath_fallback_decision(
-            &manager.supervisor(),
-            &state,
-            "fast path crashed",
-        )
-        .await;
+        let decision =
+            fastpath_fallback_decision(&manager.supervisor(), &state, "fast path crashed").await;
 
         assert!(matches!(decision, RestartDecision::Restart(_)));
     }

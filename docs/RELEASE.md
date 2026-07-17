@@ -164,6 +164,8 @@ git push origin v0.1.9
 
 工作流也监听 `master` 分支 push，并使用与正式 Release 相同的六平台矩阵构建安装包。构建结果只上传到该次 GitHub Actions run 的 artifacts，不创建或修改 GitHub Release；这样可以在打 tag 前发现平台打包回归。只有 tag push 或手动输入 tag 时才会创建或更新 GitHub Release。
 
+macOS 的 DMG 阶段遇到 runner 挂载或 `hdiutil` 瞬态失败时会自动清理残留卷和 DMG 临时目录，并只重试一次。第二次失败仍会让工作流失败，避免掩盖可重复的打包问题。
+
 Windows x64 和 Ubuntu x64 job 会在 Tauri 打包前运行 `src-fastpath` release 模式测试并生成对应平台 sidecar；其他平台跳过 fastpath sidecar，但仍会把仓库中的 ONNX 瘦图作为普通资源打进安装包。
 
 Linux `.deb` 包会额外包含服务模式说明文件：

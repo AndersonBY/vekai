@@ -31,6 +31,9 @@ const CLOSE_CONFIRM_SCRIPT: &str = r#"
 })();
 "#;
 
+#[cfg(test)]
+pub(crate) static NETWORK_TEST_LOCK: Mutex<()> = Mutex::const_new(());
+
 pub mod cli;
 pub mod commands;
 pub mod config;

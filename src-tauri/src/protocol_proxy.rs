@@ -443,6 +443,7 @@ mod tests {
 
     #[tokio::test]
     async fn cohere_rerank_proxy_forwards_to_llama_and_maps_response() {
+        let _network_guard = crate::NETWORK_TEST_LOCK.lock().await;
         let captured = Arc::new(Mutex::new(None::<Value>));
         let backend_listener = TcpListener::bind(("127.0.0.1", 0))
             .await

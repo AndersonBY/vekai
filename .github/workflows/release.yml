@@ -190,7 +190,31 @@ jobs:
         run: ./scripts/prepare-bundled-runtime.ps1 -RuntimePlatform ${{ matrix.runtime-platform }}
 
       - name: Build Tauri bundles
+        if: runner.os != 'macOS'
         run: npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --ci --no-sign
+
+      - name: Build Tauri DMG
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          for attempt in 1 2; do
+            if npx tauri build --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}" --ci --no-sign; then
+              exit 0
+            fi
+
+            if [[ "$attempt" -eq 2 ]]; then
+              exit 1
+            fi
+
+            echo "::warning::macOS DMG bundling failed; cleaning transient state before one retry"
+            if [[ -d /Volumes/Vekai ]]; then
+              hdiutil detach /Volumes/Vekai || hdiutil detach -force /Volumes/Vekai || true
+            fi
+            rm -rf "src-tauri/target/${{ matrix.target }}/release/bundle/dmg"
+            sleep 5
+          done
 
       - name: Collect release artifacts
         shell: pwsh

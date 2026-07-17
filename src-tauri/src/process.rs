@@ -1551,6 +1551,7 @@ mod tests {
 
     #[tokio::test]
     async fn proxy_protocol_launch_uses_internal_llama_port_and_public_proxy_port() {
+        let _network_guard = crate::NETWORK_TEST_LOCK.lock().await;
         let public_listener = TcpListener::bind(("127.0.0.1", 0))
             .await
             .expect("public port reservation should bind");
@@ -1679,6 +1680,7 @@ mod tests {
 
     #[tokio::test]
     async fn launch_port_check_rejects_occupied_public_port() {
+        let _network_guard = crate::NETWORK_TEST_LOCK.lock().await;
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .await
             .expect("public port reservation should bind");
@@ -1836,6 +1838,7 @@ mod tests {
 
     #[tokio::test]
     async fn unexpected_exit_with_restart_enabled_attempts_saved_context_restart() {
+        let _network_guard = crate::NETWORK_TEST_LOCK.lock().await;
         let manager = ProcessManager::new();
         let temp_dir = tempfile::tempdir().expect("temp dir should be created");
         let logs = LogPaths {
@@ -2049,6 +2052,7 @@ mod tests {
 
     #[tokio::test]
     async fn startup_child_exit_attempts_restart_without_waiting_for_health_timeout() {
+        let _network_guard = crate::NETWORK_TEST_LOCK.lock().await;
         let manager = ProcessManager::new();
         let temp_dir = tempfile::tempdir().expect("temp dir should be created");
         let logs = LogPaths {
@@ -2111,6 +2115,7 @@ mod tests {
 
     #[tokio::test]
     async fn stop_during_startup_health_wait_wins_without_restart() {
+        let _network_guard = crate::NETWORK_TEST_LOCK.lock().await;
         let manager = ProcessManager::new();
         let temp_dir = tempfile::tempdir().expect("temp dir should be created");
         let logs = LogPaths {
@@ -2199,6 +2204,7 @@ mod tests {
 
     #[tokio::test]
     async fn superseded_startup_health_wait_does_not_claim_new_child() {
+        let _network_guard = crate::NETWORK_TEST_LOCK.lock().await;
         let manager = ProcessManager::new();
         let temp_dir = tempfile::tempdir().expect("temp dir should be created");
         let logs = LogPaths {

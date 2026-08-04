@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use axum::{
     extract::State,
     http::StatusCode,
@@ -7,29 +7,23 @@ use axum::{
     Json, Router,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use ort::{
-    ep,
-    session::{builder::GraphOptimizationLevel, RunOptions, Session},
-    value::Tensor,
-};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
     convert::Infallible,
     ffi::OsStr,
     io::Write,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::mpsc::{self, Receiver, SyncSender},
     thread,
     time::{Duration, Instant},
 };
-use tokenizers::{Tokenizer, TruncationParams};
 use tokio::sync::oneshot;
+use vekai_embedding_fastpath::{
+    EmbeddingOutput as EngineOutput, EmbeddingRuntime as Engine, EmbeddingRuntimeConfig,
+    EMBEDDING_DIMENSION,
+};
 
-const EMBEDDING_DIMENSION: usize = 1024;
-const PREWARM_SEQUENCE_LENGTH: usize = 32;
-const PREWARM_BATCHES: [usize; 4] = [1, 8, 32, 64];
-const QWEN_PAD_TOKEN_ID: u32 = 151_643;
 const MICRO_BATCH_DELAY: Duration = Duration::from_micros(750);
 const WORK_QUEUE_CAPACITY: usize = 128;
 
@@ -65,192 +59,6 @@ fn parse_path(value: &OsStr) -> std::result::Result<PathBuf, Infallible> {
     Ok(PathBuf::from(value))
 }
 
-struct EncodedBatch {
-    input_ids: Vec<Vec<u32>>,
-    token_counts: Vec<usize>,
-    max_sequence_length: usize,
-}
-
-struct EngineOutput {
-    embeddings: Vec<Vec<f32>>,
-    token_counts: Vec<usize>,
-}
-
-struct Engine {
-    tokenizer: Tokenizer,
-    session: Session,
-    run_options: RunOptions,
-}
-
-impl Engine {
-    fn load(config: &Config) -> Result<Self> {
-        eprintln!("fastpath stage=ort-init");
-        let _ = ort::init_from(&config.ort_library)?
-            .with_name("vekai-embedding-fastpath")
-            .commit();
-
-        eprintln!("fastpath stage=tokenizer");
-        let mut tokenizer = Tokenizer::from_file(&config.tokenizer)
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-        tokenizer
-            .with_truncation(Some(TruncationParams {
-                max_length: config.max_sequence_length,
-                ..Default::default()
-            }))
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-
-        eprintln!("fastpath stage=session-build");
-        let session = build_session(&config.model)?;
-        let run_options = RunOptions::new()?;
-        eprintln!("fastpath stage=session-ready");
-
-        let mut engine = Self {
-            tokenizer,
-            session,
-            run_options,
-        };
-        engine.prewarm()?;
-        Ok(engine)
-    }
-
-    fn prewarm(&mut self) -> Result<()> {
-        let seed = self
-            .tokenizer
-            .encode("Vekai local embedding warmup", true)
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?
-            .get_ids()
-            .to_vec();
-        let seed = seed
-            .iter()
-            .copied()
-            .cycle()
-            .take(PREWARM_SEQUENCE_LENGTH)
-            .collect::<Vec<_>>();
-        for batch_size in PREWARM_BATCHES {
-            eprintln!("fastpath stage=prewarm batch={batch_size}");
-            let encoded = EncodedBatch {
-                input_ids: vec![seed.clone(); batch_size],
-                token_counts: vec![PREWARM_SEQUENCE_LENGTH; batch_size],
-                max_sequence_length: PREWARM_SEQUENCE_LENGTH,
-            };
-            for _ in 0..2 {
-                ensure_finite(&self.run(&encoded)?)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn embed(&mut self, inputs: &[String]) -> Result<EngineOutput> {
-        let mut embeddings = Vec::with_capacity(inputs.len());
-        let mut token_counts = Vec::with_capacity(inputs.len());
-        for chunk in inputs.chunks(64) {
-            let encoded = self.encode(chunk)?;
-            token_counts.extend_from_slice(&encoded.token_counts);
-            let mut chunk_embeddings = self.run(&encoded)?;
-            embeddings.append(&mut chunk_embeddings);
-        }
-        ensure_finite(&embeddings)?;
-        Ok(EngineOutput {
-            embeddings,
-            token_counts,
-        })
-    }
-
-    fn encode(&self, inputs: &[String]) -> Result<EncodedBatch> {
-        let encodings = self
-            .tokenizer
-            .encode_batch(inputs.to_vec(), true)
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-        let input_ids = encodings
-            .iter()
-            .map(|encoding| encoding.get_ids().to_vec())
-            .collect::<Vec<_>>();
-        let token_counts = input_ids.iter().map(Vec::len).collect::<Vec<_>>();
-        let max_sequence_length = token_counts.iter().copied().max().unwrap_or(0).max(1);
-        Ok(EncodedBatch {
-            input_ids,
-            token_counts,
-            max_sequence_length,
-        })
-    }
-
-    fn run(&mut self, encoded: &EncodedBatch) -> Result<Vec<Vec<f32>>> {
-        let batch_size = encoded.input_ids.len();
-        let sequence_length = encoded.max_sequence_length;
-        let mut input_ids = vec![i64::from(QWEN_PAD_TOKEN_ID); batch_size * sequence_length];
-        let mut attention_mask = vec![0_i64; batch_size * sequence_length];
-        fill_left_padded(
-            &encoded.input_ids,
-            sequence_length,
-            &mut input_ids,
-            &mut attention_mask,
-        );
-        let input_ids =
-            Tensor::from_array(([batch_size, sequence_length], input_ids.into_boxed_slice()))?;
-        let attention_mask = Tensor::from_array((
-            [batch_size, sequence_length],
-            attention_mask.into_boxed_slice(),
-        ))?;
-        let outputs = self
-            .session
-            .run_with_options(ort::inputs![input_ids, attention_mask], &self.run_options)?;
-        let values = outputs["embeddings"].try_extract_tensor::<f32>()?.1;
-        embeddings_from_flat(values, batch_size)
-    }
-}
-
-fn build_session(model: &Path) -> Result<Session> {
-    let builder = Session::builder().map_err(|error| anyhow::anyhow!(error.to_string()))?;
-    let builder = builder
-        .with_optimization_level(GraphOptimizationLevel::Level3)
-        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-    let mut builder = builder
-        .with_execution_providers([ep::CUDA::default()
-            .with_device_id(0)
-            .with_tf32(true)
-            .build()
-            .error_on_failure()])
-        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-    builder
-        .commit_from_file(model)
-        .map_err(|error| anyhow::anyhow!(error.to_string()))
-}
-
-fn fill_left_padded(
-    rows: &[Vec<u32>],
-    sequence_length: usize,
-    input_ids: &mut [i64],
-    attention_mask: &mut [i64],
-) {
-    for (row_index, row) in rows.iter().enumerate() {
-        let visible = row.len().min(sequence_length);
-        let source_start = row.len() - visible;
-        let target_start = row_index * sequence_length + sequence_length - visible;
-        for (offset, token) in row[source_start..].iter().enumerate() {
-            input_ids[target_start + offset] = i64::from(*token);
-            attention_mask[target_start + offset] = 1;
-        }
-    }
-}
-
-fn embeddings_from_flat(values: &[f32], count: usize) -> Result<Vec<Vec<f32>>> {
-    if values.len() < count * EMBEDDING_DIMENSION {
-        bail!("embedding output is shorter than expected");
-    }
-    Ok(values
-        .chunks_exact(EMBEDDING_DIMENSION)
-        .take(count)
-        .map(<[f32]>::to_vec)
-        .collect())
-}
-
-fn ensure_finite(embeddings: &[Vec<f32>]) -> Result<()> {
-    if embeddings.iter().flatten().any(|value| !value.is_finite()) {
-        bail!("embedding engine returned a non-finite value");
-    }
-    Ok(())
-}
-
 struct Work {
     inputs: Vec<String>,
     response: oneshot::Sender<Result<EngineOutput, String>>,
@@ -274,7 +82,12 @@ fn start_worker(config: Config) -> Result<SyncSender<Work>> {
 }
 
 fn worker_main(config: Config, work_rx: Receiver<Work>, ready_tx: SyncSender<()>) -> ! {
-    let mut engine = match Engine::load(&config) {
+    let mut engine = match Engine::start(EmbeddingRuntimeConfig {
+        model: config.model,
+        tokenizer: config.tokenizer,
+        ort_library: config.ort_library,
+        max_sequence_length: config.max_sequence_length,
+    }) {
         Ok(engine) => engine,
         Err(error) => {
             eprintln!("fastpath initialization failed: {error:#}");
@@ -486,30 +299,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn left_padding_keeps_tokens_at_sequence_end() {
-        let rows = vec![vec![10, 11], vec![20, 21, 22, 23, 24]];
-        let mut input_ids = vec![i64::from(QWEN_PAD_TOKEN_ID); 8];
-        let mut attention_mask = vec![0_i64; 8];
-
-        fill_left_padded(&rows, 4, &mut input_ids, &mut attention_mask);
-
-        assert_eq!(
-            input_ids,
-            vec![
-                i64::from(QWEN_PAD_TOKEN_ID),
-                i64::from(QWEN_PAD_TOKEN_ID),
-                10,
-                11,
-                21,
-                22,
-                23,
-                24,
-            ]
-        );
-        assert_eq!(attention_mask, vec![0, 0, 1, 1, 1, 1, 1, 1]);
-    }
-
-    #[test]
     fn reduced_dimensions_are_renormalized() {
         let mut embedding = vec![0.0; EMBEDDING_DIMENSION];
         embedding[0] = 3.0;
@@ -520,11 +309,5 @@ mod tests {
         assert_eq!(reduced.len(), 2);
         assert!((reduced[0] - 0.6).abs() < 1e-6);
         assert!((reduced[1] - 0.8).abs() < 1e-6);
-    }
-
-    #[test]
-    fn flat_output_must_contain_every_requested_embedding() {
-        let values = vec![0.0; EMBEDDING_DIMENSION - 1];
-        assert!(embeddings_from_flat(&values, 1).is_err());
     }
 }

@@ -6,6 +6,7 @@ experiments/**/target/
 experiments/**/.venv/
 src-tauri/gen/
 release/
+artifacts/
 docs/superpowers/
 downloads/*
 !downloads/.gitkeep

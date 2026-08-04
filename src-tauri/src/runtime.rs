@@ -11,13 +11,15 @@ use tar::{Archive, EntryType};
 use zip::ZipArchive;
 
 pub const RUNTIME_ARCHIVE_FILE_HINT: &str = "llama-b*-bin-<platform>.<zip|tar.gz>";
-pub const RUNTIME_ZIP_FILE_HINT: &str = "llama-b*-bin-win-vulkan-x64.zip";
-pub const RUNTIME_DIR_NAME: &str = "llama-bin-win-vulkan-x64";
+pub const RUNTIME_ZIP_FILE_HINT: &str = "llama-b*-bin-win-cpu-x64.zip";
+pub const RUNTIME_DIR_NAME: &str = "llama-bin-win-cpu-x64";
 pub const WINDOWS_CUDA_RUNTIME_DIR_NAME: &str = "llama-bin-win-cuda-12.4-x64";
+pub const WINDOWS_VULKAN_RUNTIME_DIR_NAME: &str = "llama-bin-win-vulkan-x64";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimePlatform {
     WindowsCudaX64,
+    WindowsCpuX64,
     WindowsVulkanX64,
     WindowsCpuArm64,
     UbuntuX64,
@@ -34,7 +36,8 @@ impl RuntimePlatform {
     pub fn runtime_dir_name(self) -> &'static str {
         match self {
             Self::WindowsCudaX64 => WINDOWS_CUDA_RUNTIME_DIR_NAME,
-            Self::WindowsVulkanX64 => "llama-bin-win-vulkan-x64",
+            Self::WindowsCpuX64 => RUNTIME_DIR_NAME,
+            Self::WindowsVulkanX64 => WINDOWS_VULKAN_RUNTIME_DIR_NAME,
             Self::WindowsCpuArm64 => "llama-bin-win-cpu-arm64",
             Self::UbuntuX64 => "llama-bin-ubuntu-x64",
             Self::UbuntuArm64 => "llama-bin-ubuntu-arm64",
@@ -46,7 +49,10 @@ impl RuntimePlatform {
     pub fn server_file_name(self) -> &'static str {
         if matches!(
             self,
-            Self::WindowsCudaX64 | Self::WindowsVulkanX64 | Self::WindowsCpuArm64
+            Self::WindowsCudaX64
+                | Self::WindowsCpuX64
+                | Self::WindowsVulkanX64
+                | Self::WindowsCpuArm64
         ) {
             "llama-server.exe"
         } else {
@@ -57,6 +63,7 @@ impl RuntimePlatform {
     pub fn archive_hint(self) -> &'static str {
         match self {
             Self::WindowsCudaX64 => "llama-b*-bin-win-cuda-12.4-x64.zip and cudart companion",
+            Self::WindowsCpuX64 => "llama-b*-bin-win-cpu-x64.zip",
             Self::WindowsVulkanX64 => "llama-b*-bin-win-vulkan-x64.zip",
             Self::WindowsCpuArm64 => "llama-b*-bin-win-cpu-arm64.zip",
             Self::UbuntuX64 => "llama-b*-bin-ubuntu-x64.tar.gz",
@@ -73,6 +80,9 @@ impl RuntimePlatform {
                 lower.starts_with("llama-")
                     && lower.ends_with("-bin-win-cuda-12.4-x64.zip")
                     && !lower.starts_with("cudart-")
+            }
+            Self::WindowsCpuX64 => {
+                lower.starts_with("llama-") && lower.ends_with("-bin-win-cpu-x64.zip")
             }
             Self::WindowsVulkanX64 => {
                 lower.starts_with("llama-")
@@ -107,7 +117,7 @@ impl RuntimePlatform {
 
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 fn current_runtime_platform() -> RuntimePlatform {
-    RuntimePlatform::WindowsVulkanX64
+    RuntimePlatform::WindowsCpuX64
 }
 
 #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
@@ -218,6 +228,24 @@ pub fn ensure_runtime_from_downloads(
             runtime_root,
             download_dirs,
             RuntimePlatform::WindowsCudaX64,
+        );
+    }
+
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    if find_runtime_archives(download_dirs, RuntimePlatform::WindowsCpuX64).is_ok() {
+        return ensure_runtime_from_downloads_for_platform(
+            runtime_root,
+            download_dirs,
+            RuntimePlatform::WindowsCpuX64,
+        );
+    }
+
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    if find_runtime_archives(download_dirs, RuntimePlatform::WindowsVulkanX64).is_ok() {
+        return ensure_runtime_from_downloads_for_platform(
+            runtime_root,
+            download_dirs,
+            RuntimePlatform::WindowsVulkanX64,
         );
     }
 
@@ -637,7 +665,7 @@ mod tests {
     fn runtime_layout_points_to_expected_server() {
         let temp_dir = tempfile::tempdir().expect("temp dir should be created");
         let runtime_root = temp_dir.path().join("runtimes");
-        let layout = runtime_layout_for_platform(&runtime_root, RuntimePlatform::WindowsVulkanX64);
+        let layout = runtime_layout_for_platform(&runtime_root, RuntimePlatform::WindowsCpuX64);
 
         assert_eq!(layout.runtime_dir, runtime_root.join(RUNTIME_DIR_NAME));
         assert_eq!(
@@ -648,7 +676,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_layout_separates_cuda_from_vulkan() {
+    fn runtime_layout_separates_cuda_from_cpu() {
         let temp_dir = tempfile::tempdir().expect("temp dir should be created");
         let runtime_root = temp_dir.path().join("runtimes");
         let layout = runtime_layout_for_platform(&runtime_root, RuntimePlatform::WindowsCudaX64);
@@ -685,6 +713,9 @@ mod tests {
             .matches_asset_name("cudart-llama-bin-win-cuda-12.4-x64.zip"));
         assert!(!RuntimePlatform::WindowsCudaX64
             .matches_asset_name("llama-b9999-bin-win-cuda-13.3-x64.zip"));
+        assert!(
+            RuntimePlatform::WindowsCpuX64.matches_asset_name("llama-b9999-bin-win-cpu-x64.zip")
+        );
         assert!(RuntimePlatform::WindowsVulkanX64
             .matches_asset_name("llama-b9999-bin-win-vulkan-x64.zip"));
         assert!(
@@ -846,6 +877,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("temp dir should be created");
         let downloads_dir = temp_dir.path().join("downloads");
         fs::create_dir_all(&downloads_dir).expect("downloads dir should be created");
+        write_test_runtime_zip(&downloads_dir.join("llama-b9999-bin-win-cpu-x64.zip"));
         write_test_runtime_zip(&downloads_dir.join("llama-b9999-bin-win-vulkan-x64.zip"));
         write_test_runtime_zip(&downloads_dir.join("llama-b9999-bin-win-cuda-12.4-x64.zip"));
         write_test_cuda_companion_zip(
@@ -868,6 +900,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("temp dir should be created");
         let downloads_dir = temp_dir.path().join("downloads");
         fs::create_dir_all(&downloads_dir).expect("downloads dir should be created");
+        write_test_runtime_zip(&downloads_dir.join("llama-b9999-bin-win-cpu-x64.zip"));
         write_test_runtime_zip(&downloads_dir.join("llama-b9999-bin-win-vulkan-x64.zip"));
         write_test_runtime_zip(&downloads_dir.join("llama-b9999-bin-win-cuda-12.4-x64.zip"));
 
@@ -875,9 +908,28 @@ mod tests {
             temp_dir.path().join("runtimes").as_path(),
             &[downloads_dir],
         )
-        .expect("Vulkan fallback should succeed");
+        .expect("CPU fallback should succeed");
 
         assert!(layout.runtime_dir.ends_with(RUNTIME_DIR_NAME));
+    }
+
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    #[test]
+    fn automatic_windows_runtime_uses_vulkan_only_when_cpu_is_missing() {
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let downloads_dir = temp_dir.path().join("downloads");
+        fs::create_dir_all(&downloads_dir).expect("downloads dir should be created");
+        write_test_runtime_zip(&downloads_dir.join("llama-b9999-bin-win-vulkan-x64.zip"));
+
+        let layout = ensure_runtime_from_downloads(
+            temp_dir.path().join("runtimes").as_path(),
+            &[downloads_dir],
+        )
+        .expect("Vulkan compatibility fallback should succeed");
+
+        assert!(layout
+            .runtime_dir
+            .ends_with(WINDOWS_VULKAN_RUNTIME_DIR_NAME));
     }
 
     #[test]
@@ -888,7 +940,7 @@ mod tests {
         let error = ensure_runtime_from_downloads_for_platform(
             temp_dir.path().join("runtimes").as_path(),
             &[downloads_dir],
-            RuntimePlatform::WindowsVulkanX64,
+            RuntimePlatform::WindowsCpuX64,
         )
         .expect_err("missing runtime zip should fail clearly");
 

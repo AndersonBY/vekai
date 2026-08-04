@@ -204,8 +204,12 @@ if (-not $SkipRuntime) {
     if ($WindowsBackend -eq 'cuda' -and $resolvedRuntimePlatform -ne 'windows-x64') {
         throw "WindowsBackend 'cuda' is only supported for windows-x64."
     }
-    $runtimePatterns = if ($resolvedRuntimePlatform -eq 'windows-x64' -and $WindowsBackend -eq 'cuda') {
-        @($runtimePlatformConfig.cudaAssetPatterns | ForEach-Object { [string]$_ })
+    $runtimePatterns = if ($resolvedRuntimePlatform -eq 'windows-x64') {
+        switch ($WindowsBackend) {
+            'cuda' { @($runtimePlatformConfig.cudaAssetPatterns | ForEach-Object { [string]$_ }) }
+            'vulkan' { @([string]$runtimePlatformConfig.vulkanAssetPattern) }
+            default { @([string]$runtimePlatformConfig.assetPattern) }
+        }
     } else {
         @([string]$runtimePlatformConfig.assetPattern)
     }

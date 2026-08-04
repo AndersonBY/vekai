@@ -10,6 +10,8 @@ use tauri::image::Image;
 use tauri::menu::MenuBuilder;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{include_image, AppHandle, Manager, WindowEvent, Wry};
+#[cfg(target_os = "windows")]
+use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt;
 use tokio::sync::Mutex;
 
@@ -47,6 +49,52 @@ pub mod protocol_proxy;
 pub mod runtime;
 pub mod service;
 pub mod state;
+#[cfg(target_os = "windows")]
+mod windows_prerequisites;
+
+#[cfg(target_os = "windows")]
+fn prompt_for_portable_vc_runtime(app: &tauri::App<Wry>) -> anyhow::Result<bool> {
+    use std::process::Command;
+
+    let Some(requirement) = windows_prerequisites::detect_portable_vc_runtime_requirement()? else {
+        return Ok(false);
+    };
+
+    let installed = requirement
+        .installed_version
+        .map(|version| version.to_string())
+        .unwrap_or_else(|| "未安装".to_string());
+    let message = format!(
+        "检测到 Microsoft Visual C++ x64 运行库缺失或版本过旧。\n\n当前版本：{installed}\n需要版本：{}\n\n点击“确定”后将启动随软件提供的微软官方安装程序。安装完成后，请重新打开 Vekai。",
+        requirement.required_version
+    );
+    let dialog_handle = app.handle().clone();
+    let callback_handle = dialog_handle.clone();
+    dialog_handle
+        .dialog()
+        .message(message)
+        .title("Vekai 运行环境安装")
+        .kind(MessageDialogKind::Warning)
+        .show(
+            move |_| match Command::new(&requirement.installer_path).spawn() {
+                Ok(_) => callback_handle.exit(0),
+                Err(error) => {
+                    let exit_handle = callback_handle.clone();
+                    callback_handle
+                        .dialog()
+                        .message(format!(
+                            "无法启动 Microsoft Visual C++ 安装程序：{error}\n\n请手动运行：\n{}",
+                            requirement.installer_path.display()
+                        ))
+                        .title("Vekai 运行环境安装失败")
+                        .kind(MessageDialogKind::Error)
+                        .show(move |_| exit_handle.exit(1));
+                }
+            },
+        );
+
+    Ok(true)
+}
 
 pub async fn run_service_foreground() -> anyhow::Result<()> {
     let paths = build_app_paths()?;
@@ -728,6 +776,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            #[cfg(target_os = "windows")]
+            if prompt_for_portable_vc_runtime(app)? {
+                return Ok(());
+            }
+
             let resource_dir = app.path().resource_dir().ok();
             let paths = build_app_paths_with_resource_dir(resource_dir.as_deref())?;
             ensure_log_dir(&paths.logs)?;

@@ -220,11 +220,12 @@ pub fn build_app_paths_with_resource_dir(resource_dir: Option<&Path>) -> anyhow:
         &current_dir,
     );
     let logs = log_paths(&local_data_dir);
+    let config_path = resolve_config_path(&exe_dir, &config_dir);
 
     Ok(AppPaths {
         exe_dir,
         model_base_dir,
-        config_path: config_dir.join("config.json"),
+        config_path,
         download_dirs,
         runtime_root: local_data_dir.join("runtimes"),
         local_data_dir,
@@ -515,11 +516,16 @@ async fn snapshot(state: &SharedAppState) -> AppSnapshot {
 }
 
 fn selected_service_model_path(
-    exe_dir: &Path,
+    model_base_dir: &Path,
     config: &AppConfig,
     service: ServiceKind,
 ) -> anyhow::Result<PathBuf> {
     if let Some(configured_path) = path_if_present(config.service_model_path(service)) {
+        let configured_path = if configured_path.is_absolute() {
+            configured_path
+        } else {
+            model_base_dir.join(configured_path)
+        };
         if configured_path.is_file() && is_gguf_path(&configured_path) {
             return Ok(dunce::canonicalize(&configured_path).unwrap_or(configured_path));
         }
@@ -531,13 +537,13 @@ fn selected_service_model_path(
         ));
     }
 
-    choose_default_model_for_service(service, &discover_models(exe_dir, None)?)
+    choose_default_model_for_service(service, &discover_models(model_base_dir, None)?)
         .map(|model| model.path)
         .ok_or_else(|| {
             anyhow!(
                 "No GGUF model found for {} service in {}",
                 service.display_name(),
-                exe_dir.join("models").display(),
+                model_base_dir.join("models").display(),
             )
         })
 }
@@ -557,8 +563,17 @@ fn model_catalog_for_config(
     model_base_dir: &Path,
     config: &AppConfig,
 ) -> anyhow::Result<ModelCatalog> {
-    let rerank_model = path_if_present(config.service_model_path(ServiceKind::Rerank));
-    let embedding_model = path_if_present(config.service_model_path(ServiceKind::Embedding));
+    let resolve_configured_model = |service| {
+        path_if_present(config.service_model_path(service)).map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                model_base_dir.join(path)
+            }
+        })
+    };
+    let rerank_model = resolve_configured_model(ServiceKind::Rerank);
+    let embedding_model = resolve_configured_model(ServiceKind::Embedding);
 
     discover_model_catalog(
         model_base_dir,
@@ -703,6 +718,15 @@ fn resolve_model_base_dir(
     }
 
     exe_dir.to_path_buf()
+}
+
+fn resolve_config_path(exe_dir: &Path, config_dir: &Path) -> PathBuf {
+    let portable_config = exe_dir.join("config.json");
+    if portable_config.is_file() {
+        portable_config
+    } else {
+        config_dir.join("config.json")
+    }
 }
 
 fn resolve_download_dirs(
@@ -974,6 +998,32 @@ mod tests {
     }
 
     #[test]
+    fn portable_config_next_to_executable_takes_precedence() {
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let exe_dir = temp_dir.path().join("app");
+        let config_dir = temp_dir.path().join("user-config");
+        fs::create_dir_all(&exe_dir).expect("app dir should be created");
+        fs::write(exe_dir.join("config.json"), "{}").expect("portable config should be written");
+
+        assert_eq!(
+            resolve_config_path(&exe_dir, &config_dir),
+            exe_dir.join("config.json")
+        );
+    }
+
+    #[test]
+    fn user_config_is_used_without_portable_config() {
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let exe_dir = temp_dir.path().join("app");
+        let config_dir = temp_dir.path().join("user-config");
+
+        assert_eq!(
+            resolve_config_path(&exe_dir, &config_dir),
+            config_dir.join("config.json")
+        );
+    }
+
+    #[test]
     fn download_dirs_include_bundled_resource_downloads() {
         let temp_dir = tempfile::tempdir().expect("temp dir should be created");
         let exe_dir = temp_dir.path().join("app");
@@ -1199,6 +1249,32 @@ mod tests {
 
         let model_path = selected_service_model_path(&exe_dir, &config, ServiceKind::Rerank)
             .expect("model should be selected");
+
+        assert_eq!(
+            model_path,
+            dunce::canonicalize(&selected).expect("selected model path should canonicalize")
+        );
+    }
+
+    #[test]
+    fn selected_model_path_resolves_relative_to_portable_model_base() {
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let exe_dir = temp_dir.path().join("app");
+        let models_dir = exe_dir.join("models");
+        fs::create_dir_all(&models_dir).expect("models dir should be created");
+        let selected = models_dir.join("selected.gguf");
+        fs::write(&selected, b"selected").expect("model should be written");
+        let config = AppConfig {
+            rerank: crate::config::ServiceConfig::new(
+                true,
+                8012,
+                "models/selected.gguf".to_string(),
+            ),
+            ..AppConfig::default()
+        };
+
+        let model_path = selected_service_model_path(&exe_dir, &config, ServiceKind::Rerank)
+            .expect("relative model should be selected");
 
         assert_eq!(
             model_path,

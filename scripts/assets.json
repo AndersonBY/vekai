@@ -1,9 +1,19 @@
 {
+  "windowsPrerequisites": {
+    "vcRedistX64": {
+      "fileName": "vc_redist.x64.exe",
+      "version": "14.44.35211.0",
+      "url": "https://download.visualstudio.microsoft.com/download/pr/9b0d1fa5-c16d-4ee8-97f0-c2734086ece8/CC0FF0EB1DC3F5188AE6300FAEF32BF5BEEBA4BDD6E8E445A9184072096B713B/VC_redist.x64.exe",
+      "sizeBytes": 25635768,
+      "sha256": "cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b"
+    }
+  },
   "runtime": {
     "githubRepo": "ggml-org/llama.cpp",
     "platforms": {
       "windows-x64": {
-        "assetPattern": "^llama-b[0-9]+-bin-win-vulkan-x64\\.zip$",
+        "assetPattern": "^llama-b[0-9]+-bin-win-cpu-x64\\.zip$",
+        "vulkanAssetPattern": "^llama-b[0-9]+-bin-win-vulkan-x64\\.zip$",
         "cudaAssetPatterns": [
           "^llama-b[0-9]+-bin-win-cuda-12\\.4-x64\\.zip$",
           "^cudart-llama-bin-win-cuda-12\\.4-x64\\.zip$"

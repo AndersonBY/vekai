@@ -2,21 +2,25 @@
 
 Vekai 是一个桌面 GUI 与 CLI 服务双模式应用。它管理本机 `llama-server`/`llama-server.exe`，并在 Windows/Linux x64 NVIDIA 环境中可选管理 ONNX Runtime CUDA Embedding sidecar，对外保持统一的 Embedding 和 Rerank HTTP 服务。
 
+## 产品定位与边界
+
+Vekai 面向同一台电脑上的知识库、智能搜索、桌面助手和其他 LLM 应用，为它们提供可复用的本地 Embedding 与 Rerank 服务。上层应用通过 loopback HTTP 调用 Vekai，不需要分别集成和守护模型运行时。
+
+Vekai 负责模型路径、运行时、硬件后端、进程生命周期、健康检查和协议适配。向量数据库、文档切分、索引、召回策略、Prompt 构造和完整 RAG 工作流属于调用方，不在 Vekai 的系统边界内。
+
 ## 系统边界
 
 ```text
-React Settings UI
-        |
-        | Tauri commands
-        v
-Rust app state and config
-        |
-        +--> bundled/local runtime archive lookup and extraction
-        +--> model path validation
-        +--> process supervision
-        +--> protocol proxy
-                 |
-                 v
+AI / LLM / RAG applications       React Settings UI
+              |                         |
+              | local HTTP              | Tauri commands
+              v                         v
+Public Embedding/Rerank endpoints   Rust app state and config
+              |                         |
+              | native or proxy         +--> runtime archive lookup/extraction
+              |                         +--> model path validation
+              |                         +--> process supervision
+              v                         +--> protocol proxy lifecycle
           llama-server or embedding fastpath sidecar
 ```
 
@@ -57,6 +61,10 @@ Rust app state and config
 ```text
 %APPDATA%\Vekai\config.json
 ```
+
+若 exe 同级存在 `config.json`，应用优先读取并保存该文件，用于绿色便携交付。便携配置中的相对 `model_path` 以 exe 所在目录为基准解析；普通安装未提供同级配置时仍使用上述用户配置目录。
+
+Windows 便携交付还可在 exe 同级提供 `redist\vc_redist.x64.exe` 和 `redist\version.txt`。当三者与便携 `config.json` 同时存在时，GUI 启动会先检查 Microsoft Visual C++ 2015-2022 x64 Runtime 注册表版本；缺失或版本过旧时提示并启动包内安装器，跳过该次服务初始化。普通安装版和非 Windows 平台不执行该检查。
 
 当前配置是以服务为单位组织的结构：
 
@@ -99,7 +107,7 @@ Rust app state and config
 
 Embedding 和 Rerank 请求不复用生成式 KV 状态，因此启动参数固定包含 `--cache-ram 0`，避免 llama.cpp 的 8 GiB prompt cache 管理开销。运行时日志使用 `--log-verbosity 1`，只保留错误级输出；每个服务日志在启动前检查，超过 16 MiB 时截断并写入说明，防止高频推理长期写盘拖慢服务。
 
-Windows x64 安装包默认内置通用 Vulkan runtime。若下载目录中同时存在 `llama-b*-bin-win-cuda-12.4-x64.zip` 和 `cudart-llama-bin-win-cuda-12.4-x64.zip`，运行时解析会优先解压并使用 CUDA；只有一个 CUDA archive 时视为不完整并回退 Vulkan。CUDA 与 Vulkan 分别解压到独立目录。Marker 记录所有组成 archive 的文件名、大小和 SHA256；文件名与大小未变化时走快速复用路径，首次安装或元数据变化时才重新计算 SHA256。
+Windows x64 通用安装包默认内置纯 CPU runtime，避免客户机器因显卡或 Vulkan 驱动不兼容而启动崩溃。若下载目录中同时存在 `llama-b*-bin-win-cuda-12.4-x64.zip` 和 `cudart-llama-bin-win-cuda-12.4-x64.zip`，运行时解析会优先解压并使用 CUDA；只有一个 CUDA archive 时视为不完整并回退 CPU。仅在没有 CPU archive 时才使用 Vulkan compatibility fallback。CUDA、CPU 与 Vulkan 分别解压到独立目录。Marker 记录所有组成 archive 的文件名、大小和 SHA256；文件名与大小未变化时走快速复用路径，首次安装或元数据变化时才重新计算 SHA256。
 
 ## 运行模式
 

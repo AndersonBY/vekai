@@ -19,6 +19,17 @@ npm run tauri:build
 
 `build-fastpath.ps1` 支持 Windows x64 和 Linux x64；其他平台直接运行 `npm run tauri:build`。Tauri 命令会先执行前端构建，再构建 release 产物。
 
+Windows x64 便携 ZIP 在完成上述构建并准备好默认模型后生成：
+
+```powershell
+pwsh -File scripts\build-portable-windows.ps1 -WindowsBackend cpu
+pwsh -File scripts\build-portable-windows.ps1 -WindowsBackend cuda
+```
+
+脚本校验 `scripts/assets.json` 中的模型及微软 VC++ x64 Redistributable 大小与 SHA-256，组装 exe、相对路径配置、模型、指定 runtime、Embedding fastpath、`redist\` 和 `SHA256SUMS.txt`，产物写入 `release\Vekai <version>\`。通用客户包使用 CPU runtime，避免依赖客户显卡和 Vulkan 驱动；CUDA 模式要求 CUDA 12.4 主包与 cudart companion 同时存在。
+
+便携版启动时会读取 `redist\version.txt` 并检查系统注册的 Microsoft Visual C++ 2015-2022 x64 Runtime。运行库缺失或低于包内版本时，Vekai 显示中文提示、启动 `redist\vc_redist.x64.exe` 并结束本次启动；客户完成安装后重新打开 Vekai。这个检查仅在 exe 同级同时存在便携 `config.json` 和完整 `redist\` 目录时启用，不影响普通安装版或开发运行。
+
 ## 主要产物
 
 Tauri 默认产物：
@@ -71,7 +82,7 @@ Tauri 打包会把该目录映射到安装包资源目录的 `downloads/`。应�
 
 | 平台 | 下载脚本参数 | llama.cpp asset |
 | --- | --- | --- |
-| Windows x64 | `windows-x64` | 默认 `llama-b*-bin-win-vulkan-x64.zip`；`-WindowsBackend cuda` 下载 CUDA 12.4 主包和 cudart companion |
+| Windows x64 | `windows-x64` | 默认 `llama-b*-bin-win-cpu-x64.zip`；`-WindowsBackend vulkan` 显式下载 Vulkan；`-WindowsBackend cuda` 下载 CUDA 12.4 主包和 cudart companion |
 | Windows ARM64 | `windows-arm64` | `llama-b*-bin-win-cpu-arm64.zip` |
 | Ubuntu/Linux x64 | `ubuntu-x64` | `llama-b*-bin-ubuntu-x64.tar.gz` |
 | Ubuntu/Linux ARM64 | `ubuntu-arm64` | `llama-b*-bin-ubuntu-arm64.tar.gz` |
@@ -92,9 +103,11 @@ models\Qwen3-Embedding-0.6B-Q8_0.gguf
 给客户交付时可以选择两种方式：
 
 1. 安装包加单独模型文件，让用户在设置页选择模型路径。
-2. 绿色目录包含 exe、安装包和 `models\`，但仍以设置页选择的完整路径为准。
+2. 绿色目录包含 exe、`models\`、`downloads\` 和 exe 同级 `config.json`。存在该配置文件时应用进入便携配置模式，优先读取并保存它；`model_path` 可以使用相对 exe 目录的路径，例如 `models\bge-reranker-v2-m3-Q4_K_M.gguf`。
 
 不要把代码改成硬编码某个开发机路径。
+
+便携配置只改变配置文件位置和相对模型路径解析。日志与首次解压的 llama.cpp runtime 仍写入 `%LOCALAPPDATA%\Vekai`，避免在只读交付介质或受限目录中运行失败。
 
 ## Windows/Linux Embedding 快路径
 
@@ -182,6 +195,8 @@ Linux `.deb` 包会额外包含服务模式说明文件：
 发布前至少检查：
 
 - 双击 exe 不出现终端窗口。
+- 便携包 exe 同级 `config.json` 使用相对模型路径，移动整个目录后仍可启动两个服务。
+- 便携包包含 `redist\vc_redist.x64.exe` 和版本元数据；缺失或旧版 VC++ x64 Runtime 会先触发安装提示，不会启动 llama.cpp。
 - 启动后先打开设置窗口。
 - 设置窗口可切换中文/英文。
 - 可以为两个服务选择 `.gguf` 模型。
@@ -208,7 +223,7 @@ Linux `.deb` 包会额外包含服务模式说明文件：
 
 包含。每个平台安装包会内置对应平台的 llama.cpp runtime archive，首次启动服务时解压到 `%LOCALAPPDATA%\Vekai\runtimes`。本机数据目录或 exe 同级 `downloads\` 中的匹配 archive 可用于临时覆盖。
 
-Windows x64 通用安装包默认内置 Vulkan，避免绑定 NVIDIA。NVIDIA 交付可执行 `scripts\prepare-bundled-runtime.ps1 -WindowsBackend cuda` 构建 CUDA 专用安装包；CUDA 主包和 cudart companion 必须同时存在。也可以在安装后运行 `scripts\download-assets.ps1 -WindowsBackend cuda -SkipModels`，应用会自动优先使用 CUDA。
+Windows x64 通用安装包默认内置 CPU runtime，避免绑定显卡和驱动。NVIDIA 交付可执行 `scripts\prepare-bundled-runtime.ps1 -WindowsBackend cuda` 构建 CUDA 专用安装包；CUDA 主包和 cudart companion 必须同时存在。需要 Vulkan 专用包时显式传入 `-WindowsBackend vulkan`。应用按完整 CUDA、CPU、Vulkan 的顺序选择可用 runtime。
 
 **安装包是否必须包含模型？**
 

@@ -2,6 +2,8 @@
 
 本目录是 Vekai 的仓库知识库。根目录 [../AGENTS.md](../AGENTS.md) 只作为智能体入口地图，长期事实、设计解释、质量要求和发布步骤都应沉淀在这里。
 
+Vekai 的产品目标是为同一台电脑上的 AI/LLM 应用提供易于部署、稳定可调用的本地 Embedding 与 Rerank HTTP 服务，降低 RAG、知识库和语义搜索产品各自集成模型运行时的成本。Vekai 管理模型推理服务，但不承担向量数据库、文档切分或完整 RAG 编排。
+
 ## 文档索引
 
 | 文档 | 用途 |
@@ -11,6 +13,7 @@
 | [QUALITY.md](QUALITY.md) | 测试、验证、质量门槛和常见风险清单。 |
 | [RELEASE.md](RELEASE.md) | Windows、macOS、Linux 打包、交付目录、运行时和模型交付说明。 |
 | [PERFORMANCE.md](PERFORMANCE.md) | 本机性能基线、CUDA/FP16 实验、Profiler 结论和加速路线。 |
+| [EMBEDDING_RUNTIME.md](EMBEDDING_RUNTIME.md) | 可嵌入 Embedding runtime 库和 Reqbase 离线资产包契约。 |
 
 `docs/superpowers/` 是本地智能体规划历史目录，不作为 Git 提交内容。当前事实以本目录的顶层文档、README 和代码为准。
 
@@ -25,6 +28,7 @@
 ## 当前项目事实
 
 - 产品名：`Vekai`
+- 产品定位：面向本机 AI 应用的 Embedding 与 Rerank 服务管理器
 - 当前数据目录名：`Vekai`
 - 默认 Rerank 端口：`8012`
 - 默认 Embedding 端口：`8013`

@@ -98,7 +98,20 @@ pwsh -File scripts/download-fastpath.ps1
 - **日常回归构建**：推送到 `master` 分支时自动运行六平台矩阵构建（Windows x64/ARM64、macOS x64/ARM64、Ubuntu x64/ARM64），产物上传至 Actions Artifacts。
 - **正式版本发布**：推送 `vMAJOR.MINOR.PATCH` 标签（或手动触发工作流并指定 tag）时，先校验 `package.json`、`src-tauri/Cargo.toml` 和 `src-tauri/tauri.conf.json` 版本号一致，随后构建并将各平台安装包发布到 GitHub Release。
 
-macOS ARM64 使用 `macos-15` runner，Intel 使用 `macos-15-intel`。GitHub 已于 2026-11-02 下线 macOS 14 runner，不能再使用 `macos-14`（见[官方公告](https://github.blog/changelog/2026-10-01-github-actions-macos-14-runner-image-retirement/)）。
+当前构建环境使用 GitHub 已提供的新版 runner，并固定系统 / 工具链标签：
+
+| 构建目标 | GitHub runner |
+| --- | --- |
+| Windows x64 | `windows-2025-vs2026` |
+| Windows ARM64 | `windows-11-vs2026-arm` |
+| macOS Intel | `macos-26-intel` |
+| macOS ARM64 | `macos-26` |
+| Ubuntu x64 | `ubuntu-26.04` |
+| Ubuntu ARM64 | `ubuntu-26.04-arm` |
+
+版本校验和发布任务也使用 `ubuntu-26.04`。六个平台构建统一使用 Node.js 26 LTS 和 Rust stable；固定 Node.js 主版本与 runner 标签，补丁更新由各工具链供应方维护。可用 runner 见 [GitHub 镜像清单](https://github.com/actions/runner-images#available-images)，Node.js LTS 版本见 [Node.js 下载页](https://nodejs.org/en/download)。
+
+GitHub 已于 2026-11-02 下线 macOS 14 runner，不能再使用 `macos-14`（见[官方公告](https://github.blog/changelog/2026-10-01-github-actions-macos-14-runner-image-retirement/)）。
 
 ```powershell
 git tag v0.1.11

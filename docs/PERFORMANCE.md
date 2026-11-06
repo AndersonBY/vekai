@@ -1,95 +1,85 @@
-# 性能基线与加速路线
+# 性能测试与后端选型
 
-本文记录 2026-07-17 在开发机上的可复现实验和当前工程决策。数据用于比较后端，不能当作所有机器的固定承诺。
+本文档记录在开发机上针对不同推理后端的实测数据与技术选型结论。
 
-## 测试环境
+## EmbeddingGemma 2 图文嵌入（2026-11-06）
 
-- GPU：NVIDIA GeForce RTX 4070 Laptop GPU，8 GiB VRAM
-- 驱动：610.74
-- llama.cpp：b10046
-- Embedding：Qwen3-Embedding-0.6B，默认 Q8_0 GGUF
-- Rerank：bge-reranker-v2-m3 Q4_K_M GGUF
-- HTTP 基准：约 30 token/条，包含 loopback HTTP 和 JSON 序列化，结果取 P50
+测试环境为 Windows、Intel Core i9-13900H（14 核 / 20 线程）、RTX 4070 Laptop GPU（8 GiB，驱动 616.56）、llama.cpp b12110。主模型和多模态编码器均为 `ggml-org/embeddinggemma-2-GGUF` Q8_0，输出 768 维向量。CUDA 组将主模型及编码器都加载至 GPU，CPU 组关闭两者的 GPU offload。
 
-实验脚本位于 `experiments/encoder_fastpath/` 和 `experiments/llama_backend/`。Python/PyTorch 只用于测性能上限，不属于正式安装包。
+每次请求包含一条输入，无并发；首个请求完成后连续测量 7 次，取中位数。文字为 800 个汉字（含标点共 874 字符，533 tokens）；图片为一张 2560×1440 JPEG 摄影图片（934444 字节，编码后输入为 1012 tokens）。请求耗时从本地 HTTP 发送至读完响应，包含服务端图片解码、推理和响应序列化，不含模型加载、客户端文件读取与 Base64/JSON 编码。
 
-## llama.cpp 后端
+| 后端 | 800 汉字预热后 P50 | 2K 图片预热后 P50 | 文字首次请求 | 图片首次请求 |
+| --- | ---: | ---: | ---: | ---: |
+| CPU | 931 ms | 28494 ms | 1027 ms | 29189 ms |
+| CUDA | 39 ms | 858 ms | 272 ms | 1280 ms |
 
-Embedding 同模型、同参数、同请求对比：
+CPU 文字 7 次范围为 896–943 ms，图片为 27877–29603 ms；CUDA 文字为 22–47 ms，图片为 815–990 ms。图片结果来自同一张样本的重复请求，不能视为所有 2K 图片的统一性能。
 
-| 条数 | Vulkan Q8 | CUDA Q8 | CUDA 加速比 |
+测试设置 `--batch-size 2048 --ubatch-size 2048`。llama.cpp 默认物理批 512 会拒绝上述 533-token 文本；Vekai 从 0.1.11 起为未显式设置物理批的 EmbeddingGemma 2 自动使用有效逻辑批大小（默认 2048），显式配置仍优先生效。模型加载至 `/health` 就绪约 2.6–4.3 秒，未计入请求延迟。
+
+## Qwen3 历史测试环境
+
+- **GPU**：NVIDIA GeForce RTX 4070 Laptop GPU (8 GiB VRAM)，驱动 610.74
+- **llama.cpp**：b10046
+- **测试模型**：Embedding 使用 `Qwen3-Embedding-0.6B` (Q8_0 GGUF / FP16 ONNX)，Rerank 使用 `bge-reranker-v2-m3` (Q4_K_M GGUF)
+- **测试负载**：每条约 30 tokens，通过本地 HTTP 接口测试端到端延迟（含 JSON 序列化与回环网络开销），取 P50
+
+复现脚本位于 `experiments/encoder_fastpath/`、`experiments/onnx_fastpath/` 与 `experiments/llama_backend/`。
+
+## llama.cpp 后端对比（Vulkan vs CUDA）
+
+在相同模型、参数与请求负载下，Embedding（Qwen3-Embedding-0.6B Q8_0）端到端 P50 延迟对比：
+
+| 批量大小 | Vulkan Q8 | CUDA Q8 | CUDA 加速比 |
 | ---: | ---: | ---: | ---: |
 | 1 | 9.6 ms | 9.0 ms | 1.1x |
 | 8 | 55.0 ms | 24.1 ms | 2.3x |
 | 32 | 791.6 ms | 343.2 ms | 2.3x |
 | 64 | 1318.2 ms | 496.7 ms | 2.7x |
 
-正式 release 同时加载 Embedding 和 Rerank 后，Embedding 32/64 条测得 304.0/417.5 ms。Vekai 因此在 Windows x64 检测到完整 CUDA 12.4 主包和 cudart companion 时优先 CUDA，资产不完整时回退 Vulkan。
+同时加载 Embedding 与 Rerank 两个模型后，CUDA Q8 在 32/64 条批量下实测为 `304.0 ms` / `417.5 ms`。因此在 Windows x64 下检测到完整的 CUDA 12.4 运行时与 `cudart` 依赖时，Vekai 默认优先启用 CUDA。
 
-Rerank 的 CUDA 收益较小：1/8/32 条约快 12%–21%，64 条复测为 CUDA 137.8 ms、Vulkan 138.8 ms，基本持平。
+Rerank 模型在 CUDA 与 Vulkan 下的差距较小：1/8/32 条批量下 CUDA 快约 12%–21%，64 条批量下 CUDA（`137.8 ms`）与 Vulkan（`138.8 ms`）基本持平。
 
-## 生产 ORT CUDA 快路径
+## ONNX Runtime CUDA 快路径
 
-正式 sidecar 使用公开 `onnx-community/Qwen3-Embedding-0.6B-ONNX` FP16 权重、last-token pooling 和 L2 normalize。瘦图只保留 `input_ids`、`attention_mask` 和 FP32 `embeddings`，权重继续作为外部数据文件。相对临时参考图的逐向量结果：
+针对 `Qwen3-Embedding-0.6B`，`src-fastpath` 采用 `onnx-community/Qwen3-Embedding-0.6B-ONNX` FP16 权重，内置 last-token pooling 与 L2 normalize。裁剪后的结构图仅保留 `input_ids`、`attention_mask` 输入和 FP32 `embeddings` 输出。与参考实现逐向量对比：
 
-- 平均余弦相似度 `0.9999940`
-- 最小余弦相似度 `0.9999892`
-- 最大绝对误差 `0.0005550`
-- 所有值有限
+- 平均余弦相似度：`0.9999940`（最小 `0.9999892`）
+- 最大绝对误差：`0.0005550`
 
-固定 32 token、直接 ORT CUDA P50：
+### 普通 CUDA Session vs CUDA Graph（固定 32 tokens，纯推理 P50）
 
-| 条数 | 普通 CUDA | CUDA Graph |
+| 批量大小 | 普通 CUDA | CUDA Graph |
 | ---: | ---: | ---: |
 | 1 | 12.9 ms | 12.2 ms |
 | 8 | 16.0 ms | 15.9 ms |
 | 32 | 42.2 ms | 43.5 ms |
 | 64 | 82.1 ms | 83.6 ms |
 
-CUDA Graph 在 32/64 条时没有收益，还要求固定地址 I/O，并使长文本需要第二个 session。最终生产实现因此使用一个普通 ORT CUDA session，并只 padding 到当前微批最长文本。短文本通过真实 HTTP、丢弃响应体的 `curl.exe` P50 为：
+CUDA Graph 在大批量下无明显收益，且要求固定输入形状（处理长文本需额外维护第二个 session，显存占用翻倍至约 4.3 GiB）。因此生产环境直接采用单个动态形状的 ORT CUDA session，每次仅按当前微批内的最长文本做动态 padding。
 
-| 条数 | Windows x64 sidecar HTTP P50 |
-| ---: | ---: |
-| 1 | 23.2 ms |
-| 8 | 31.9 ms |
-| 32 | 52.6 ms |
-| 64 | 63.0 ms |
+### Sidecar 端到端 HTTP 延迟（含 Rust 分词、750µs 微批聚合与 JSON 序列化）
 
-Linux x64 使用约 30 token/条的固定文本，在 Docker Desktop 端口转发外侧测得：
+| 批量大小 | Windows x64 本机 HTTP P50 | Linux x64 Docker HTTP P50 |
+| ---: | ---: | ---: |
+| 1 | 23.2 ms | 28.8 ms |
+| 8 | 31.9 ms | 40.7 ms |
+| 32 | 52.6 ms | 68.4 ms |
+| 64 | 63.0 ms | 128.1 ms |
 
-| 条数 | Linux x64 Docker HTTP P50 |
-| ---: | ---: |
-| 1 | 28.8 ms |
-| 8 | 40.7 ms |
-| 32 | 68.4 ms |
-| 64 | 128.1 ms |
+**资源占用与启动耗时：**
+- Windows 单 session 启动并完成预热约 `3.2 s`，显存占用约 `2188 MiB`（与 Rerank llama CUDA 同时运行时合计约 `2607 MiB`）。
+- Linux Docker 环境下从 ORT 初始化到预热完成约 `3.87 s`。
+- 当强制终止 sidecar 进程时，Vekai 可在约 `2.5 s` 内将同一端口自动切换回 `llama.cpp` CUDA 后端继续服务。
 
-这些 HTTP 数字包含 Rust tokenizer、750 微秒微批窗口、GPU 推理、FP32 JSON 序列化和 loopback 传输；Linux 表还包含 Docker Desktop 端口转发。Windows 单 session release 热启动约 `3.2 s`，本机显存增量约 `2188 MiB`；Linux Docker 从 ORT 初始化到预热完成约 `3.87 s`。与 Rerank llama CUDA 同时启动时 Windows 总显存增量约 `2607 MiB`。强制终止 sidecar 后，Embedding 在约 `2.50 s` 内自动切到 llama CUDA，同端口请求继续成功。
+## 性能剖析与备选方案评估
 
-## Profiler 结论
+使用 Nsight Systems 对 64 条批量 FP16 推理过程采样，51.9% 的 GPU 时间消耗在 Tensor Core FP16 GEMM，5.6% 在 fused attention，pooling 与 normalize 占比极小。因此无需手写自定义 CUDA 算子，直接复用 cuBLAS Tensor Core 路径即可。
 
-Nsight Systems 对 64 条 eager FP16 热区采样：
+其他评估过的方案记录：
 
-- 51.9% GPU 时间是 Tensor Core FP16 GEMM。
-- 5.6% 是 fused attention。
-- 单次 forward 有 1741 次 kernel launch。
-- pooling 和 normalize 只占极小比例。
-
-因此不写自定义 GEMM、pooling 或 normalize 算子。Tensor Core GEMM 是主耗时，pooling/normalize 可忽略；自维护算子无法合理超过 cuBLAS 的 Tensor Core 路径，反而扩大驱动、架构和精度维护面。
-
-## 已否定方案
-
-- F16 GGUF：CUDA 下 32/64 条约 735/963 ms，明显慢于 Q8。
-- 本地 Q4_K_M GGUF：32/64 条约 328/480 ms，慢于紧邻 Q8 对照的 302/413 ms。
-- 强制 Flash Attention、`--no-host`、高优先级和高 polling 组合：没有稳定优于默认 CUDA 参数。
-- 直接把 Python/PyTorch 打进安装包：启动、依赖体积和跨平台交付成本不符合当前产品边界。
-- TensorRT 修复 FP32 LayerNorm 后 batch 32 为 `42.2 ms`，没有快于 ORT；首次加载约 `61.9 s`，engine `1.20 GB`，builder DLL `1.82 GB`，不进入产品。
-- TensorRT 未启用 FP32 LayerNorm 时 batch 32 出现非有限值，不能以错误精度换速度。
-- Candle CUDA 需要本机 `nvcc` 和 MSVC C++ toolchain，交付面明显大于动态加载 ORT DLL。
-- CUDA Graph：固定 32 token 的 32/64 batch 略慢于普通 CUDA，双 session 显存约 `4.3 GiB`，已从生产实现移除。
-
-## 资产和回退
-
-`scripts/download-fastpath.ps1` 固定并校验 ONNX Runtime `1.23.0`、CUDA runtime `12.1.105`、cuBLAS `12.1.3.1`、cuFFT `11.0.2.54`、Linux cuRAND `10.3.2.106` 和 cuDNN `9.1.0.70`。Windows 从对应 wheel 抽取 10 个 DLL；Linux 从 ONNX Runtime 官方 GPU tarball 和 NVIDIA wheel 抽取 11 个 `.so`，ORT provider 额外直接依赖 cuRAND。两者都不安装 Python/PyTorch。manifest schema 包含 `windows-x64`/`linux-x64` 平台标识，禁止跨平台复用动态库。应用启动只校验 manifest 常量和大文件大小，并哈希 562 KiB 瘦图，避免每次启动扫描约 2.4 GB 资产。
-
-快路径仅在 Windows/Linux x64、选择 Qwen3-Embedding-0.6B GGUF、当前平台 manifest 完整且原生 sidecar 资源存在时启用。CUDA execution provider 使用严格失败模式，禁止静默回退 CPU 后继续报告 `ort_cuda`。任何条件不满足都直接使用 llama.cpp；sidecar 启动失败、健康超时或运行期退出也会自动回退。
+- **F16 GGUF（llama.cpp CUDA）**：32/64 条耗时约 735 / 963 ms，显著慢于 Q8_0。
+- **Q4_K_M GGUF（llama.cpp CUDA）**：32/64 条耗时约 328 / 480 ms，略慢于同条件下的 Q8_0（302 / 413 ms）。
+- **TensorRT**：开启 FP32 LayerNorm 保证数值稳定后，32 条批量耗时 `42.2 ms`，与 ORT CUDA 相当，但首次构建耗时约 62 秒且运行时依赖体积过大（engine 1.20 GB + builder DLL 1.82 GB），因此未采用。
+- **Candle CUDA**：依赖本地 `nvcc` 与 C++ 编译工具链，不适合直接分发给终端用户。

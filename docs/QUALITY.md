@@ -1,8 +1,8 @@
-# 质量与验证
+# 测试与校验
 
-本项目的主要风险来自 Windows 桌面生命周期、子进程管理、协议兼容和打包交付。验证应按风险选择，不追求每次都跑全量，但不能在没有证据时宣称完成。
+本文档列出 Vekai 本地开发和打包前的检查命令与测试重点。
 
-## 基础命令
+## 常用构建与检查命令
 
 ```powershell
 git diff --check
@@ -15,89 +15,32 @@ powershell -ExecutionPolicy Bypass -File scripts\build-fastpath.ps1
 npm run tauri:build
 ```
 
-`src-fastpath` 测试和构建适用于 Windows x64 和 Linux x64；其他平台跳过这两项。Linux 变更还应在 NVIDIA Docker 环境验证 `/health` 和至少一次 1024 维 Embedding 请求。
+其中 `src-fastpath` 的测试与构建适用于 Windows x64 和 Linux x64 平台；其他架构可直接运行 `npm run tauri:build`。
 
-## 分层验证
+## 模块测试重点
 
-### 文档
+### 前端与 UI
 
-- 运行 `git diff --check`。
-- 检查新增链接是否存在。
-- 检查产品名、端口、路径、协议名是否与代码一致。
-- 检查大文件下载策略仍然说明为脚本下载，而不是 Git 跟踪。
-
-### 前端
-
-- 运行 `npm run build`。
-- 检查中文默认文案和英文切换文案。
-- 检查按钮禁用状态，尤其是服务运行时“启动服务”不能可点。
-- 检查关闭窗口弹窗文案和动作。
+- 运行 `npm run build` 确保 TypeScript 类型检查与前端打包通过。
+- 检查中英文界面切换文案是否完整。
+- 确认服务运行期间“启动服务”按钮处于禁用状态，且修改保存运行中的服务配置后会触发重启。
+- 确认关闭主窗口时弹出“最小化到托盘”或“退出”确认框。
 
 ### Rust 后端
 
 - 运行 `cargo test --manifest-path src-tauri/Cargo.toml`。
-- 配置变化必须覆盖默认值、校验和错误场景。
-- 协议变化必须覆盖请求转换、响应转换和公开路径。
-- 进程变化必须覆盖启动、停止、异常退出和重启路径。
+- **配置变更**：覆盖默认值、字段范围校验及异常输入。
+- **EmbeddingGemma 2**：验证配套 `mmproj` 自动加载和缺失错误、物理批默认跟随逻辑批、显式性能配置优先级，以及纯 CPU 模式下编码器不进行 GPU offload；实际请求至少覆盖长文本和图片。
+- **协议变更**：覆盖 `supported_protocols` 白名单、`protocol_public_path` 公开路径映射以及请求/响应 JSON 转换。
+- **进程管理**：覆盖正常启停、健康检查超时、异常退出自动重启以及 Fastpath 到 `llama.cpp` 的自动回退。
 
-### 打包和 Windows 行为
+### 安装包与桌面端冒烟
 
-- 运行 `npm run tauri:build`。
-- 检查 NSIS 安装包输出。
-- 检查生成 exe 不应弹出终端窗口。
-- 检查 `npm run verify:icons` 通过，打包 PNG 图标必须是 Tauri/macOS 可处理的 8-bit PNG。
-- 检查打包前已执行 `scripts\prepare-bundled-runtime.ps1`，且安装包内置当前平台 runtime。
-- 对用户可见生命周期变化，启动 release exe 做冒烟验证。
+- 运行 `npm run verify:icons` 确保应用图标为符合 Tauri / macOS 要求的 8-bit PNG。
+- 打包前执行 `scripts\prepare-bundled-runtime.ps1`，确保 `bundle-resources\downloads\` 下包含当前平台的 `llama.cpp` 运行时归档。
+- Windows 下启动构建出的 `release` 可执行文件，确认不会弹出额外的控制台黑框，且系统托盘、日志目录打开、单实例唤醒均工作正常。
 
-## 当前质量门槛
+## 仓库资产约定
 
-| 区域 | 必须保持 |
-| --- | --- |
-| 数据目录 | 当前写入 `Vekai`，不能回退到 `LocalRerankServer`。 |
-| 端口 | Rerank 默认 `8012`，Embedding 默认 `8013`。 |
-| UI 语言 | 默认中文，允许切换英文。 |
-| 模型路径 | 用户通过文件选择器选择完整 `.gguf` 路径，不写死模型路径。 |
-| 大资产 | llama.cpp runtime archive、`.gguf`、FP16 外部权重和 GPU 动态库不进 Git；fastpath 只提交瘦图和源码，原生 sidecar 是打包前生成物。 |
-| 托盘体验 | 关闭设置窗口应询问最小化到托盘还是退出。 |
-| 原生协议 | Rerank `/v1/rerank`，Embedding `/v1/embeddings`。 |
-| 非原生协议 | 通过本地代理转换，不直接暴露内部 llama.cpp 端口。 |
-
-## 常见回归
-
-- 新增配置字段但没有默认值或校验。
-- 前端显示状态与 Rust 快照字段不一致。
-- 服务运行中仍允许点击“启动服务”。
-- 保存服务相关配置后没有重启运行中的服务。
-- 打包后缺前端资源或包内 runtime archive。
-- 新图标是 16-bit PNG，导致 macOS Tauri 打包失败。
-- 把 `downloads\` 或 `models\*.gguf` 误提交进 Git。
-- 把 fastpath 下载归档、外部权重、GPU 动态库、sidecar 二进制或任意 `target\` 目录误提交进 Git。
-- Linux fastpath 只设置 `PATH` 而没有设置 `LD_LIBRARY_PATH`，导致 ORT CUDA provider 无法加载私有 `.so`。
-- ORT CUDA provider 静默回退 CPU，但健康检查仍被误判为 fastpath 可用。
-- 日志写到旧目录。
-- 协议下拉有选项，但 Rust 配置白名单不接受。
-- 文档示例路径和实际公开路径不一致。
-
-## 推荐测试覆盖
-
-新增协议时至少覆盖：
-
-- `supported_protocols` 接受新协议。
-- 错误服务不接受该协议。
-- `protocol_public_path` 返回正确公开路径。
-- 请求体被转换为 llama.cpp 原生请求。
-- llama.cpp 响应被转换为目标协议响应。
-
-新增 Windows 行为时至少覆盖：
-
-- 关闭窗口是否被拦截。
-- 退出程序是否停止服务。
-- 日志目录是否存在且可打开。
-- 单实例或托盘动作是否仍能打开设置窗口。
-
-## 不能替代验证的证据
-
-- 只看到 TypeScript 没有红线。
-- 只读了旧计划文档。
-- 只在 dev server 中验证了需要 release exe 才能证明的行为。
-- 只检查了文件名，没有检查 `tauri.conf.json` 或 Rust 常量。
+- **大文件不入库**：`llama.cpp` 运行时压缩包、`.gguf` 模型文件、ONNX FP16 外部权重、CUDA/cuDNN 动态库、构建产物（`target/`、`release/`）以及原生 sidecar 二进制均通过脚本下载或构建生成，不提交至 Git。
+- **Fastpath 源码与瘦图**：仓库仅跟踪 `src-fastpath/` 源码与 562 KiB 的 ONNX 结构图（`src-tauri/resources/fastpath/qwen3-embedding-0.6b-fp16.onnx`）。

@@ -175,6 +175,22 @@ function Get-LatestRuntimeAsset {
     $release = Invoke-RestMethod -Uri $apiUrl -Headers (Get-GitHubApiHeaders)
     $asset = $release.assets | Where-Object { $_.name -match $Pattern } | Select-Object -First 1
     if (-not $asset) {
+        $nightlyTagAsset = $release.assets | Where-Object { $_.name -eq 'nightly-tag.txt' } | Select-Object -First 1
+        if ($nightlyTagAsset) {
+            $tagContent = (Invoke-WebRequest -Uri $nightlyTagAsset.browser_download_url).Content
+            $nightlyTag = if ($tagContent -is [byte[]]) {
+                [System.Text.Encoding]::UTF8.GetString($tagContent).Trim()
+            } else {
+                ([string]$tagContent).Trim()
+            }
+            if ($nightlyTag -notmatch '^b[0-9]+$') {
+                throw "Invalid llama.cpp nightly tag: $nightlyTag"
+            }
+            $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/tags/$nightlyTag" -Headers (Get-GitHubApiHeaders)
+            $asset = $release.assets | Where-Object { $_.name -match $Pattern } | Select-Object -First 1
+        }
+    }
+    if (-not $asset) {
         throw "No runtime asset matching $Pattern found in $Repo latest release $($release.tag_name)."
     }
 

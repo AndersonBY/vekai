@@ -33,6 +33,15 @@ pub fn build_service_llama_server_args_for_endpoint(
 ) -> Result<Vec<String>, ConfigError> {
     config.validate()?;
     let service_config = config.service_config(service);
+    let embeddinggemma_projector = if service == ServiceKind::Embedding {
+        model_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| name.to_lowercase().starts_with("embeddinggemma-2-"))
+            .map(|name| model_path.with_file_name(format!("mmproj-{name}")))
+    } else {
+        None
+    };
 
     let mut args = vec![
         "-m".to_string(),
@@ -46,6 +55,19 @@ pub fn build_service_llama_server_args_for_endpoint(
             "rank".to_string(),
             "--rerank".to_string(),
         ]);
+    } else if let Some(projector_path) = &embeddinggemma_projector {
+        if !projector_path.is_file() {
+            return Err(ConfigError::MissingMultimodalProjector {
+                path: projector_path.to_string_lossy().into_owned(),
+            });
+        }
+        args.extend([
+            "--mmproj".to_string(),
+            projector_path.to_string_lossy().into_owned(),
+        ]);
+        if config.gpu_layers.parse::<u32>() == Ok(0) {
+            args.push("--no-mmproj-offload".to_string());
+        }
     }
 
     args.extend([
@@ -96,8 +118,17 @@ pub fn build_service_llama_server_args_for_endpoint(
 
     let ubatch_size = if service_config.ubatch_size > 0 {
         service_config.ubatch_size
-    } else {
+    } else if config.ubatch_size > 0 {
         config.ubatch_size
+    } else if embeddinggemma_projector.is_some() {
+        // Non-causal embeddings require the entire input to fit in one physical batch.
+        if batch_size > 0 {
+            batch_size
+        } else {
+            2048
+        }
+    } else {
+        0
     };
     if ubatch_size > 0 {
         args.push("--ubatch-size".to_string());
@@ -320,5 +351,89 @@ mod tests {
         assert!(!args
             .windows(2)
             .any(|window| window == ["--pooling", "rank"]));
+    }
+
+    #[test]
+    fn embeddinggemma_loads_matching_projector_from_model_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_path = dir.path().join("embeddinggemma-2-Q8_0.gguf");
+        let projector_path = dir.path().join("mmproj-embeddinggemma-2-Q8_0.gguf");
+        std::fs::write(&projector_path, b"projector").unwrap();
+        let args = build_service_llama_server_args(
+            ServiceKind::Embedding,
+            &AppConfig::default(),
+            &model_path,
+        )
+        .unwrap();
+
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--mmproj", &projector_path.to_string_lossy()]));
+        assert!(!args.iter().any(|arg| arg == "--rerank"));
+        assert!(!args.iter().any(|arg| arg == "--no-mmproj-offload"));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--ubatch-size", "2048"]));
+
+        let cpu_config = AppConfig {
+            gpu_layers: "0".to_string(),
+            ..AppConfig::default()
+        };
+        let cpu_args =
+            build_service_llama_server_args(ServiceKind::Embedding, &cpu_config, &model_path)
+                .unwrap();
+        assert!(cpu_args.iter().any(|arg| arg == "--no-mmproj-offload"));
+    }
+
+    #[test]
+    fn embeddinggemma_physical_batch_tracks_logical_batch_unless_overridden() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_path = dir.path().join("embeddinggemma-2-Q8_0.gguf");
+        std::fs::write(
+            dir.path().join("mmproj-embeddinggemma-2-Q8_0.gguf"),
+            b"projector",
+        )
+        .unwrap();
+        let mut config = AppConfig::default();
+        config.batch_size = 1024;
+        let args =
+            build_service_llama_server_args(ServiceKind::Embedding, &config, &model_path).unwrap();
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--ubatch-size", "1024"]));
+
+        config.embedding.batch_size = 4096;
+        let args =
+            build_service_llama_server_args(ServiceKind::Embedding, &config, &model_path).unwrap();
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--ubatch-size", "4096"]));
+
+        config.ubatch_size = 768;
+        let args =
+            build_service_llama_server_args(ServiceKind::Embedding, &config, &model_path).unwrap();
+        assert!(args.windows(2).any(|pair| pair == ["--ubatch-size", "768"]));
+
+        config.embedding.ubatch_size = 512;
+        let args =
+            build_service_llama_server_args(ServiceKind::Embedding, &config, &model_path).unwrap();
+        assert!(args.windows(2).any(|pair| pair == ["--ubatch-size", "512"]));
+    }
+
+    #[test]
+    fn embeddinggemma_reports_missing_projector() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_path = dir.path().join("embeddinggemma-2-Q8_0.gguf");
+        let error = build_service_llama_server_args(
+            ServiceKind::Embedding,
+            &AppConfig::default(),
+            &model_path,
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(error, ConfigError::MissingMultimodalProjector { path }
+            if path.ends_with("mmproj-embeddinggemma-2-Q8_0.gguf"))
+        );
     }
 }

@@ -4,29 +4,36 @@
 
 # Vekai
 
-Run Embedding and Rerank models locally, serve them over HTTP. Your apps talk to `127.0.0.1` — no cloud, no API keys, nothing leaves your machine.
+Vekai is a local service manager for Embedding and Rerank models. It runs and supervises local inference processes and exposes standard HTTP APIs on `127.0.0.1` for knowledge bases, RAG pipelines, and desktop AI apps.
 
 [中文说明](README_ZH.md) | [Releases](https://github.com/AndersonBY/vekai/releases/latest) | [Docs](docs/README.md)
 
 ## Quick Start
 
-1. Grab the [latest release](https://github.com/AndersonBY/vekai/releases/latest) for your platform.
-2. Launch Vekai. Pick a `.gguf` model for Rerank and another for Embedding.
+1. Download the installer for your platform from [Releases](https://github.com/AndersonBY/vekai/releases/latest).
+2. Open Vekai and select a local `.gguf` model for Rerank and Embedding.
 3. Click **Save**, then **Start Services**.
-4. Done. Your services are live at:
 
-```
+Default endpoints:
+
+```text
 Rerank:    http://127.0.0.1:8012/v1/rerank
 Embedding: http://127.0.0.1:8013/v1/embeddings
 ```
 
-**Don't have models?** The installer bundles the llama.cpp runtime but not GGUF files. Grab the defaults:
+The installer bundles the `llama.cpp` runtime, without model weights. To download the default GGUF models from a source checkout:
 
 ```powershell
 pwsh -File scripts\download-assets.ps1 -SkipRuntime
 ```
 
-## Try It
+The default Embedding model is [EmbeddingGemma 2](https://ai.google.dev/gemma/docs/embeddinggemma) Q8_0 (768 dimensions, text + image embeddings). The download script fetches both `embeddinggemma-2-Q8_0.gguf` and the multimodal projector `mmproj-embeddinggemma-2-Q8_0.gguf`. Keep both files in the same folder and select `embeddinggemma-2-Q8_0.gguf` in settings; Vekai loads the projector automatically.
+
+If you are upgrading from an older installation, make sure your `llama.cpp` runtime is b11457 or newer (rerun `download-assets.ps1` without `-SkipRuntime`, and add `-WindowsBackend cuda` if you use the Windows CUDA runtime). When switching between different Embedding models, re-index your existing vector collections.
+
+For EmbeddingGemma 2, an unset physical batch size follows the logical batch size (2048 tokens by default). Each input must fit entirely in one physical batch; increase both batch sizes for longer text.
+
+## API Examples
 
 ```powershell
 # Health check
@@ -44,39 +51,55 @@ curl.exe http://127.0.0.1:8013/v1/embeddings `
   -d '{"model":"local-embedding","input":["Hello world"],"encoding_format":"float"}'
 ```
 
-## What You Get
+### Image Embeddings
 
-- **Two APIs, one process.** Embedding + Rerank. Enable both, or just one.
-- **Offline-first.** Listens on `127.0.0.1`. No account, no internet required.
-- **Pick your model.** Any `.gguf` file, any folder. No restrictions.
-- **Protocol compatibility.** Speaks OpenAI, Cohere, Jina, SiliconFlow, Voyage formats. Pick the one your app expects — Vekai translates automatically.
-- **GPU when you want it.** CUDA, Vulkan, or CPU on Windows. CUDA fast-path for NVIDIA on Windows and Linux.
-- **Tray app.** Close the window, it keeps running in the system tray.
-- **Linux service mode.** `vekai serve` for foreground, `vekai install-service` for systemd.
-- **Portable packages.** Ship Vekai + models + config + runtimes as a single folder. No installation.
+With the default `openai_embeddings` protocol, `/v1/embeddings` supports `llama.cpp`'s multimodal input extension by passing a `content` array inside each `input` item:
 
-## Settings
+```powershell
+$image = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $PWD 'example.png')))
+$body = @{
+    model = 'local-embedding'
+    input = @(@{ content = @(
+        @{ type = 'image_url'; image_url = @{ url = "data:image/png;base64,$image" } }
+    ) })
+    encoding_format = 'float'
+} | ConvertTo-Json -Depth 8
+Invoke-RestMethod -Uri 'http://127.0.0.1:8013/v1/embeddings' -Method Post `
+    -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body))
+```
 
-| Setting | What it does |
+You can also include `@{ type = 'text'; text = 'Image description' }` in the same `content` array to produce a combined text-and-image vector.
+
+## Features
+
+- **Dual Services**: Run Embedding and Rerank together or independently.
+- **Protocol Adaptation**: Native OpenAI / `llama.cpp` endpoints plus built-in protocol translation for Cohere, Jina, SiliconFlow, and Voyage.
+- **Hardware Acceleration**: Supports CPU, Vulkan, and CUDA, with an optional ONNX Runtime CUDA fast path for Qwen3-Embedding-0.6B.
+- **Desktop & Service Modes**: Runs in the Windows system tray or as a Linux GUI app, foreground CLI (`vekai serve`), or user `systemd` service (`vekai install-service`).
+- **Portable Builds**: Package Vekai, runtimes, config, and models into a self-contained directory.
+
+## Configuration
+
+| Setting | Description |
 | --- | --- |
-| Host | `127.0.0.1` (local only) or `0.0.0.0` (LAN — use with care) |
-| Port | One per service; can't be shared |
-| Protocol | API format your app connects to |
-| Model path | `.gguf` file per service |
-| GPU layers | `auto`, `all`, a number, or `0` for CPU |
-| Auto-start | Launch services when Vekai opens |
-| Restart on crash | Recover if a model process dies |
-| Threads / batch | `0` = let llama.cpp decide |
+| Host | `127.0.0.1` (local only) or `0.0.0.0` (LAN access) |
+| Port | Defaults to `8012` for Rerank and `8013` for Embedding |
+| Protocol | Public API format exposed to caller applications |
+| Model path | Path to the local `.gguf` model file |
+| GPU layers | `auto`, `all`, a specific layer count, or `0` for CPU-only |
+| Auto-start | Start enabled services automatically when Vekai launches |
+| Restart on crash | Automatically restart a service process if it exits unexpectedly |
+| Threads / batch | `0` lets `llama.cpp` choose automatically |
 
-[Full config reference →](docs/ARCHITECTURE.md)
+See [Architecture](docs/ARCHITECTURE.md) for the full configuration schema and protocol mappings.
 
-## Files
+## Paths
 
-| What | Where |
+| Purpose | Path |
 | --- | --- |
-| Config | `%APPDATA%\Vekai\config.json` (or next to the exe for portable builds) |
+| Config | `%APPDATA%\Vekai\config.json` (or next to the executable in portable mode) |
 | Logs | `%LOCALAPPDATA%\Vekai\logs` |
-| Runtimes | `%LOCALAPPDATA%\Vekai\runtimes` |
+| Extracted runtimes | `%LOCALAPPDATA%\Vekai\runtimes` |
 
 ## Development
 
@@ -89,23 +112,19 @@ cargo test --manifest-path src-tauri/Cargo.toml
 npm run tauri:build
 ```
 
-Build a portable Windows package:
+Build portable Windows packages:
 
 ```powershell
 pwsh -File scripts\build-portable-windows.ps1 -WindowsBackend cpu
 pwsh -File scripts\build-portable-windows.ps1 -WindowsBackend cuda
 ```
 
-More: [Architecture](docs/ARCHITECTURE.md) · [Quality](docs/QUALITY.md) · [Release](docs/RELEASE.md)
+Further documentation: [Architecture](docs/ARCHITECTURE.md) · [Quality & Testing](docs/QUALITY.md) · [Release Guide](docs/RELEASE.md)
 
 ## Troubleshooting
 
-**Service won't start.** Check `%LOCALAPPDATA%\Vekai\logs`. Make sure model files exist and ports aren't in use. Hit `/health` to verify.
-
-**Slow first launch.** Runtimes are extracted on first run and cached. Model loading also takes a moment on cold start.
-
-**CUDA / Vulkan crashes.** Try the CPU portable package, or set GPU layers to `0` to isolate the issue.
-
-**Can't reach from another machine.** `127.0.0.1` is local-only by design. Use `0.0.0.0` and firewall rules if you need LAN access. Don't expose it to the internet.
-
-**VC++ prompt on Windows.** The portable build checks for Microsoft Visual C++ and launches the installer if needed. Restart Vekai after.
+- **Service fails to start**: Check `%LOCALAPPDATA%\Vekai\logs`, verify the `.gguf` file exists, and make sure the configured port is free.
+- **Slow first launch**: Runtimes are extracted on first run and reused on subsequent launches.
+- **CUDA or Vulkan errors**: Set GPU layers to `0` to test CPU mode, or switch to the CPU portable build.
+- **Cannot connect from another machine**: `127.0.0.1` only accepts local connections. Change the host to `0.0.0.0` and allow the port through your firewall for LAN access.
+- **VC++ installer prompt on Windows**: Portable builds check for the Microsoft Visual C++ 2015-2022 Redistributable on startup and launch the bundled installer when needed. Restart Vekai once installation finishes.

@@ -4,29 +4,36 @@
 
 # Vekai
 
-在本地运行 Embedding 和 Rerank 模型，通过 HTTP 接口暴露出去。你的应用连 `127.0.0.1` 就能用——不上云、不需要 API Key、数据不出本机。
+Vekai 是一个本地 Embedding 与 Rerank 服务管理工具。它在本地启动并守护模型推理进程，向外提供标准 HTTP 接口，供知识库、RAG 和桌面 AI 应用直接调用。
 
 [English](README.md) | [下载](https://github.com/AndersonBY/vekai/releases/latest) | [文档](docs/README.md)
 
 ## 快速上手
 
 1. 从 [Releases](https://github.com/AndersonBY/vekai/releases/latest) 下载对应平台的安装包。
-2. 启动 Vekai，给 Rerank 和 Embedding 各选一个 `.gguf` 模型。
-3. 点**保存**，再点**启动服务**。
-4. 搞定。服务地址如下：
+2. 启动 Vekai，为 Rerank 和 Embedding 分别选择本地 `.gguf` 模型文件。
+3. 点击**保存**，再点击**启动服务**。
 
-```
+默认服务地址：
+
+```text
 Rerank:    http://127.0.0.1:8012/v1/rerank
 Embedding: http://127.0.0.1:8013/v1/embeddings
 ```
 
-**没有模型？** 安装包自带 llama.cpp 运行环境，但不含 GGUF 模型文件。下载默认模型：
+安装包已内置 `llama.cpp` 运行时，不含模型文件。如需下载默认模型，在仓库目录下运行：
 
 ```powershell
 pwsh -File scripts\download-assets.ps1 -SkipRuntime
 ```
 
-## 试一下
+默认 Embedding 模型为 [EmbeddingGemma 2](https://ai.google.dev/gemma/docs/embeddinggemma) Q8_0（768 维，支持文本与图片嵌入）。脚本会同时下载主模型 `embeddinggemma-2-Q8_0.gguf` 和多模态编码器 `mmproj-embeddinggemma-2-Q8_0.gguf`。将两个文件放在同一目录下，在设置页选择主模型即可，Vekai 会自动加载配套编码器。
+
+从旧版本升级时，请确保 `llama.cpp` 版本不低于 b11457（去掉 `-SkipRuntime` 重新运行下载脚本即可更新运行时；Windows CUDA 用户可附加 `-WindowsBackend cuda`）。切换不同 Embedding 模型后，需要重新生成业务侧的向量索引。
+
+EmbeddingGemma 2 未设置物理批大小时，Vekai 自动使其与逻辑批大小一致（默认 `2048` tokens）。单条输入必须完整放入一个物理批；处理更长文本时，请同时提高逻辑批和物理批大小。
+
+## 接口调用示例
 
 ```powershell
 # 健康检查
@@ -44,41 +51,57 @@ curl.exe http://127.0.0.1:8013/v1/embeddings `
   -d '{"model":"local-embedding","input":["你好世界"],"encoding_format":"float"}'
 ```
 
-## 能力一览
+### 图片嵌入
 
-- **两种服务，一个应用。** Embedding + Rerank 同时跑，也可以只开一个。
-- **纯本地运行。** 默认监听 `127.0.0.1`，不需要账号，不需要联网。
-- **模型自由选。** 任意目录下的 `.gguf` 文件，不限制路径。
-- **多协议兼容。** 支持 OpenAI、Cohere、Jina、SiliconFlow、Voyage 等 API 格式。你的应用用哪种协议，Vekai 就给你转成哪种。
-- **GPU 加速。** Windows 上可选 CUDA、Vulkan 或 CPU；NVIDIA 显卡在 Windows 和 Linux 上还能走 CUDA 快通道。
-- **托盘常驻。** 关掉窗口，服务在系统托盘继续跑。
-- **Linux 服务模式。** `vekai serve` 前台运行，`vekai install-service` 装成 systemd 服务。
-- **便携打包。** 把 Vekai + 模型 + 配置 + 运行时打成一个文件夹，解压即用。
+在默认的 `openai_embeddings` 协议下，`/v1/embeddings` 支持 `llama.cpp` 的多模态扩展格式——在每个 `input` 元素中传入 `content` 数组：
 
-## 设置项
+```powershell
+$image = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $PWD 'example.png')))
+$body = @{
+    model = 'local-embedding'
+    input = @(@{ content = @(
+        @{ type = 'image_url'; image_url = @{ url = "data:image/png;base64,$image" } }
+    ) })
+    encoding_format = 'float'
+} | ConvertTo-Json -Depth 8
+Invoke-RestMethod -Uri 'http://127.0.0.1:8013/v1/embeddings' -Method Post `
+    -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body))
+```
 
-| 设置 | 说明 |
+同一个 `content` 数组里也可以同时传入 `@{ type = 'text'; text = '图片说明' }`，生成图文联合向量。
+
+## 功能特性
+
+- **双服务管理**：同时或单独运行 Embedding 与 Rerank 服务。
+- **多协议适配**：原生支持 OpenAI / llama.cpp 接口，内置 Cohere、Jina、SiliconFlow、Voyage 协议转换代理。
+- **多后端加速**：支持 CPU、Vulkan 和 CUDA；针对 Qwen3-Embedding-0.6B 提供可选的 ONNX Runtime CUDA 加速通道。
+- **桌面与服务双模式**：Windows 下支持系统托盘常驻与开机自启；Linux 下支持 GUI、`vekai serve` 前台运行及 `systemd` 用户服务安装。
+- **绿色便携包**：支持将程序、配置、运行时和模型打包为独立目录，解压即用。
+
+## 配置说明
+
+| 设置项 | 说明 |
 | --- | --- |
-| 监听地址 | `127.0.0.1` 仅本机；`0.0.0.0` 开放局域网（谨慎使用） |
-| 端口 | 每个服务独立端口，不能共用 |
-| 接口协议 | 决定了你的应用用什么 API 格式调用 |
-| 模型路径 | 每个服务单独指定 `.gguf` 文件 |
-| GPU 层数 | `auto` 自动、`all` 全部、填数字、或 `0` 纯 CPU |
-| 自动启动 | Vekai 启动后自动拉起服务 |
-| 崩溃重启 | 模型进程异常退出后自动恢复 |
-| 线程 / 批处理 | `0` 交给 llama.cpp 自己决定 |
+| 监听地址 | 默认 `127.0.0.1`（仅本机访问）；设为 `0.0.0.0` 可开放局域网访问 |
+| 端口 | Rerank 默认 `8012`，Embedding 默认 `8013` |
+| 接口协议 | 对外暴露的 API 格式（如 OpenAI、Cohere、Jina 等） |
+| 模型路径 | 本地 `.gguf` 模型文件路径 |
+| GPU 层数 | `auto`（自动）、`all`（全部加载到 GPU）、具体层数或 `0`（仅 CPU） |
+| 自动启动 | 启动 Vekai 时自动拉起已启用的服务 |
+| 崩溃重启 | 子进程异常退出时自动拉起 |
+| 线程 / 批处理 | 设为 `0` 时由 `llama.cpp` 自动决定 |
 
-[完整配置说明 →](docs/ARCHITECTURE.md)
+完整配置字段与协议说明见 [架构说明](docs/ARCHITECTURE.md)。
 
-## 文件位置
+## 目录结构
 
-| 内容 | 路径 |
+| 用途 | 路径 |
 | --- | --- |
-| 配置 | `%APPDATA%\Vekai\config.json`（便携版在 exe 同目录） |
-| 日志 | `%LOCALAPPDATA%\Vekai\logs` |
-| 运行时 | `%LOCALAPPDATA%\Vekai\runtimes` |
+| 配置文件 | `%APPDATA%\Vekai\config.json`（便携版位于 `exe` 同级目录） |
+| 日志目录 | `%LOCALAPPDATA%\Vekai\logs` |
+| 运行时解压目录 | `%LOCALAPPDATA%\Vekai\runtimes` |
 
-## 开发
+## 本地开发
 
 ```powershell
 npm install
@@ -96,16 +119,12 @@ pwsh -File scripts\build-portable-windows.ps1 -WindowsBackend cpu
 pwsh -File scripts\build-portable-windows.ps1 -WindowsBackend cuda
 ```
 
-更多：[架构说明](docs/ARCHITECTURE.md) · [质量规范](docs/QUALITY.md) · [发布指南](docs/RELEASE.md)
+更多开发文档：[架构说明](docs/ARCHITECTURE.md) · [测试与校验](docs/QUALITY.md) · [打包与发布](docs/RELEASE.md)
 
 ## 常见问题
 
-**服务启动不了。** 看 `%LOCALAPPDATA%\Vekai\logs` 日志，确认模型文件存在、端口没被占用，再手动请求 `/health`。
-
-**第一次启动慢。** 首次使用会解压运行时环境并缓存，后续就快了。模型加载本身也需要时间。
-
-**CUDA 或 Vulkan 崩溃。** 换 CPU 便携包试试，或者把 GPU 层数设成 `0` 先用 CPU 跑通排查。
-
-**其他电脑访问不了。** `127.0.0.1` 就是只给本机用的。真要开放局域网就改成 `0.0.0.0` 并配好防火墙，别直接暴露到公网。
-
-**Windows 弹出 VC++ 安装提示。** 便携版检测到系统缺少 Visual C++ 运行库时会自动拉起微软官方安装程序，装完重新打开 Vekai 就行。
+- **服务无法启动**：检查 `%LOCALAPPDATA%\Vekai\logs` 下的日志，确认 `.gguf` 模型文件存在且对应端口未被占用。
+- **首次启动较慢**：首次启动需要解压 `llama.cpp` 运行时并加载模型，后续启动会直接复用已解压的运行时。
+- **显卡后端报错或崩溃**：可将 GPU 层数设为 `0` 切换到纯 CPU 模式排查驱动问题，或直接使用 CPU 版便携包。
+- **局域网其他机器无法访问**：默认监听 `127.0.0.1` 仅限本机访问；如需局域网调用，请将监听地址改为 `0.0.0.0` 并配置防火墙规则。
+- **便携版提示安装 VC++ 运行库**：Windows 便携版启动时若检测到系统缺少 Visual C++ 2015-2022 运行库，会自动拉起内置的微软官方安装程序，安装完成后重新打开即可。

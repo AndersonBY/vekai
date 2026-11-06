@@ -1,9 +1,8 @@
-# Embedding Runtime Library
+# Embedding Runtime 库与离线资产包
 
-`src-fastpath` exposes a host-callable Rust library in addition to the existing
-HTTP sidecar binary.
+除了作为独立的 HTTP sidecar 运行外，`src-fastpath` 还提供可供宿主程序直接调用的 Rust 库接口（`vekai_embedding_fastpath`）。
 
-The library entry points are:
+## Rust 库调用方式
 
 ```rust
 use vekai_embedding_fastpath::{EmbeddingRuntime, EmbeddingRuntimeConfig};
@@ -17,36 +16,16 @@ let runtime = EmbeddingRuntime::start(EmbeddingRuntimeConfig {
 let vectors = runtime.embed(&texts)?;
 ```
 
-The host must inject absolute paths for the ONNX model, tokenizer, and ONNX
-Runtime library. The library does not discover models, read Vekai configuration,
-or use Vekai data directories. This keeps embedding lifecycle and asset
-ownership under the host application.
+调用方通过 `EmbeddingRuntimeConfig` 传入模型、分词器与 ONNX Runtime 动态库的绝对路径。该库本身不读取 Vekai 的配置文件或数据目录，便于集成到其他桌面或服务端应用中。
 
-On Windows, the library registers the injected ONNX Runtime library directory
-with the system DLL search API for the lifetime of `EmbeddingRuntime`. CUDA,
-cuDNN, and provider dependencies therefore remain private to the declared
-runtime directory; the host does not need to modify its process `PATH`.
+在 Windows 上，`EmbeddingRuntime` 会在生命周期内将指定的 ONNX Runtime 目录注册到系统 DLL 搜索路径，因此宿主进程无需修改全局 `PATH` 环境变量即可加载私有的 CUDA / cuDNN 依赖库。可通过 `EmbeddingRuntime::health` 查询当前生效的后端、输出向量维度和最大序列长度。
 
-`EmbeddingRuntime::health` reports the active backend, output dimension, and
-maximum sequence length. Embeddings are derived data and must not be treated as
-business decisions or authoritative records.
+## 构建 Reqbase 离线资产包
 
-## Reqbase offline asset package
-
-On Windows x64, an existing Vekai fastpath installation can be converted into
-an offline asset package for Reqbase:
+在已安装 Vekai Fastpath 资产的 Windows x64 机器上，可通过以下脚本将模型与运行时打包为供 Reqbase 使用的离线资产包：
 
 ```powershell
 pwsh.exe -NoLogo -NoProfile -File scripts\build-reqbase-ai-assets.ps1
 ```
 
-The script reads `%LOCALAPPDATA%\Vekai\fastpath\manifest.json`, requires schema
-version 2, verifies every declared source file, and includes the ONNX graph,
-external weights, tokenizer, ONNX Runtime, CUDA, and cuDNN libraries. It creates
-a new timestamped directory under `artifacts\`, plus a ZIP and a `.sha256`
-file. Existing output directories and archives are never overwritten.
-
-The generated `manifest.json` uses `reqbase.ai-assets.v1`. It declares every
-file with its size and SHA-256, and carries the combined model asset hash used
-by the host-callable embedding runtime. Model and runtime binaries remain
-delivery artifacts and must not be committed to Git.
+该脚本会读取并校验 `%LOCALAPPDATA%\Vekai\fastpath\manifest.json`（要求 schema version 2），将 ONNX 结构图、FP16 外部权重、分词器以及 ONNX Runtime / CUDA / cuDNN 动态库打包至 `artifacts\` 下的时间戳目录，并生成对应的 `.zip` 压缩包、`.sha256` 校验文件以及符合 `reqbase.ai-assets.v1` 规范的 `manifest.json`。

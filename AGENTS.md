@@ -1,38 +1,33 @@
-# Agent Guide
+# Development Guide
 
-This repository is optimized for agentic development. Keep this file short: it is the map, not the encyclopedia. Long-lived project facts belong in `docs/`.
+Vekai is a desktop tray app and CLI service manager for running local Embedding and Rerank HTTP services, built with Tauri v2, Rust, React, and Vite.
 
-## Start Here
+## Documentation Map
 
-- Product overview and user setup: [README_ZH.md](README_ZH.md) and [README.md](README.md)
-- Documentation map: [docs/README.md](docs/README.md)
-- Architecture and module boundaries: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- Agent working loop: [docs/AGENT_WORKFLOW.md](docs/AGENT_WORKFLOW.md)
-- Quality and verification rules: [docs/QUALITY.md](docs/QUALITY.md)
-- Packaging and delivery notes: [docs/RELEASE.md](docs/RELEASE.md)
+- User overview: [README_ZH.md](README_ZH.md) and [README.md](README.md)
+- Docs index: [docs/README.md](docs/README.md)
+- Architecture & protocols: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Development workflow: [docs/AGENT_WORKFLOW.md](docs/AGENT_WORKFLOW.md)
+- Testing & verification: [docs/QUALITY.md](docs/QUALITY.md)
+- Packaging & releases: [docs/RELEASE.md](docs/RELEASE.md)
+- Performance notes: [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
+- Embedded runtime library: [docs/EMBEDDING_RUNTIME.md](docs/EMBEDDING_RUNTIME.md)
 
-## Product Snapshot
+## Project Snapshot
 
-Vekai is a Windows tray app and Linux GUI/CLI service app for running local GGUF-based Embedding and Rerank HTTP services. It is built with Tauri v2, Rust, React, and Vite. Matching llama.cpp runtimes and default GGUF models are downloaded by `scripts/download-assets.ps1` and are intentionally not tracked in Git.
+Default service endpoints:
 
-The app name for user-facing data is `Vekai`:
+| Service | Default protocol | Default port | Native path |
+| --- | --- | ---: | --- |
+| Rerank | `llama_rerank` | `8012` | `/v1/rerank` |
+| Embedding | `openai_embeddings` | `8013` | `/v1/embeddings` |
 
-- Config: `%APPDATA%\Vekai\config.json`
+Runtime data locations on Windows:
+
+- Config: `%APPDATA%\Vekai\config.json` (or `config.json` next to the executable in portable mode)
 - Logs: `%LOCALAPPDATA%\Vekai\logs`
-- Runtime extraction: `%LOCALAPPDATA%\Vekai\runtimes`
-- Runtime downloads: `%LOCALAPPDATA%\Vekai\downloads` or repository `downloads\`
-
-Do not reintroduce `LocalRerankServer` for current paths. Mentions of that name should be historical only.
-
-## Working Rules
-
-- Prefer repository facts over memory or assumptions. Inspect current code before changing behavior.
-- Keep `AGENTS.md` as a compact routing file. Add durable explanations to `docs/`.
-- Do not add legacy config compatibility unless the user explicitly asks. This project is still in active development.
-- Preserve user work in the dirty tree. Stage or edit only files relevant to the current task.
-- Use `rg` for search and `apply_patch` for manual file edits.
-- Keep UI text Chinese by default, with English as the secondary language.
-- When changing Windows app behavior, verify the packaged app assumptions, not just the dev server.
+- Extracted runtimes: `%LOCALAPPDATA%\Vekai\runtimes`
+- Downloaded runtimes: `%LOCALAPPDATA%\Vekai\downloads` or `downloads\`
 
 ## Common Commands
 
@@ -47,50 +42,21 @@ npm run tauri:build
 git diff --check
 ```
 
-For docs-only changes, run at least `git diff --check` and a focused read-through of changed Markdown.
+## Key Modules
 
-## Current Defaults
-
-| Service | Default protocol | Default port | Native path |
-| --- | --- | ---: | --- |
-| Rerank | `llama_rerank` | `8012` | `/v1/rerank` |
-| Embedding | `openai_embeddings` | `8013` | `/v1/embeddings` |
-
-Supported protocol details live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Where To Change Things
-
-- Tauri window, tray, lifecycle, and command registration: `src-tauri/src/lib.rs`
+- App lifecycle, tray, window, and commands: `src-tauri/src/lib.rs`, `src-tauri/src/commands.rs`
 - Config schema and validation: `src-tauri/src/config.rs`
-- App commands and path resolution: `src-tauri/src/commands.rs`
-- llama.cpp argument construction: `src-tauri/src/llama_args.rs`
-- Process supervision and restart behavior: `src-tauri/src/process.rs`
-- Runtime extraction: `src-tauri/src/runtime.rs`
-- Asset download manifest and script: `scripts/assets.json`, `scripts/download-assets.ps1`
-- Model discovery helpers: `src-tauri/src/models.rs`
-- Protocol adapters and proxying: `src-tauri/src/protocol_adapter.rs`, `src-tauri/src/protocol_proxy.rs`
-- React settings UI: `src/App.tsx`, `src/styles.css`, `src/types.ts`
+- `llama-server` argument builder: `src-tauri/src/llama_args.rs`
+- Process supervision and health checks: `src-tauri/src/process.rs`
+- Runtime archive lookup and extraction: `src-tauri/src/runtime.rs`
+- Embedding CUDA sidecar & fastpath: `src-tauri/src/fastpath.rs`, `src-fastpath/`
+- Model discovery: `src-tauri/src/models.rs`
+- Protocol conversion and local proxy: `src-tauri/src/protocol_adapter.rs`, `src-tauri/src/protocol_proxy.rs`
+- Asset manifests and packaging scripts: `scripts/assets.json`, `scripts/download-assets.ps1`, `scripts/build-portable-windows.ps1`
+- Settings UI: `src/App.tsx`, `src/styles.css`, `src/types.ts`
 
-## Verification Expectations
+## Conventions
 
-- Rust behavior: run `cargo test --manifest-path src-tauri/Cargo.toml`.
-- Frontend/type changes: run `npm run build`.
-- Packaging or Windows app behavior: run `npm run tauri:build` when practical.
-- Linux service behavior: verify `vekai serve` and, when possible, `install-service` under WSL/Docker/Linux.
-- Runtime or model asset changes: run `powershell -ExecutionPolicy Bypass -File scripts\download-assets.ps1` and verify the downloaded files are ignored by Git.
-- Protocol changes: add or update Rust tests around request/response conversion.
-- UI changes: verify the settings window behavior, tray behavior, and Chinese/English text.
-- Docs changes: check links, commands, product names, and data directories.
-
-## Documentation Maintenance
-
-When a decision becomes durable, update `docs/` in the same change. Good candidates:
-
-- new service protocols or endpoint behavior
-- config schema changes
-- packaging, installer, or release layout changes
-- asset download URLs, hashes, sizes, or runtime lookup changes
-- data directory, log, or runtime extraction changes
-- agent workflow rules learned from a failure
-
-Avoid adding task-specific notes to this file. Link to the relevant doc instead.
+- Default UI language is Chinese, with English available in settings.
+- `llama.cpp` runtime archives, `.gguf` models, and ONNX external weights are fetched via `scripts/` and excluded from Git.
+- Keep documentation in `docs/` in sync when changing protocols, config fields, default models, paths, or packaging layout.

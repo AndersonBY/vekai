@@ -227,6 +227,8 @@ fn validate_protocol(service: ServiceKind, protocol: &str) -> Result<(), ConfigE
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
+    #[error("missing EmbeddingGemma 2 multimodal projector: {path}. Download the matching mmproj GGUF alongside the model with scripts/download-assets.ps1")]
+    MissingMultimodalProjector { path: String },
     #[error("failed to parse config JSON: {0}")]
     Json(#[from] serde_json::Error),
     #[error("host cannot be empty")]

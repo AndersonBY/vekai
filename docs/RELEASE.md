@@ -1,67 +1,45 @@
-# 发布与交付
+# 打包与发布
 
-本文档记录 Vekai 的 Windows、macOS 和 Linux 打包交付事实。用户使用说明见 [../README_ZH.md](../README_ZH.md) 和 [../README.md](../README.md)。
+本文档说明 Vekai 在 Windows、macOS 和 Linux 平台上的打包流程、运行时与模型分发方式，以及 GitHub Release 自动发布配置。
 
-## 打包命令
+## 本地打包流程
 
-先准备安装包内置 runtime。该命令会从 `ggml-org/llama.cpp` 最新 GitHub Release 下载当前平台匹配的 archive 到 `bundle-resources/downloads/`：
+1. 准备安装包内置的 `llama.cpp` 运行时（自动从 `ggml-org/llama.cpp` 下载当前平台匹配的归档到 `bundle-resources/downloads/`）：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\prepare-bundled-runtime.ps1
 ```
 
-再打包：
+2. 构建 Embedding 快路径 sidecar（仅 Windows x64 / Linux x64 需要）并执行 Tauri 打包：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build-fastpath.ps1
 npm run tauri:build
 ```
 
-`build-fastpath.ps1` 支持 Windows x64 和 Linux x64；其他平台直接运行 `npm run tauri:build`。Tauri 命令会先执行前端构建，再构建 release 产物。
+Windows 默认构建产物位于：
 
-Windows x64 便携 ZIP 在完成上述构建并准备好默认模型后生成：
+```text
+src-tauri\target\release\vekai.exe
+src-tauri\target\release\bundle\nsis\Vekai_0.1.11_x64-setup.exe
+```
+
+### 构建 Windows 便携包（Portable ZIP）
+
+完成上述构建并下载默认模型后，可组装解压即用的 Windows x64 便携包：
 
 ```powershell
 pwsh -File scripts\build-portable-windows.ps1 -WindowsBackend cpu
 pwsh -File scripts\build-portable-windows.ps1 -WindowsBackend cuda
 ```
 
-脚本校验 `scripts/assets.json` 中的模型及微软 VC++ x64 Redistributable 大小与 SHA-256，组装 exe、相对路径配置、模型、指定 runtime、Embedding fastpath、`redist\` 和 `SHA256SUMS.txt`，产物写入 `release\Vekai <version>\`。通用客户包使用 CPU runtime，避免依赖客户显卡和 Vulkan 驱动；CUDA 模式要求 CUDA 12.4 主包与 cudart companion 同时存在。
+便携包构建脚本会校验 `scripts/assets.json` 中定义的模型与微软 VC++ x64 运行库文件（SHA-256 及大小），将可执行文件、相对路径 `config.json`、模型、指定后端运行时、Fastpath 资源、`redist\` 目录以及 `SHA256SUMS.txt` 一并输出至 `release\Vekai <version>\`。
 
-便携版启动时会读取 `redist\version.txt` 并检查系统注册的 Microsoft Visual C++ 2015-2022 x64 Runtime。运行库缺失或低于包内版本时，Vekai 显示中文提示、启动 `redist\vc_redist.x64.exe` 并结束本次启动；客户完成安装后重新打开 Vekai。这个检查仅在 exe 同级同时存在便携 `config.json` 和完整 `redist\` 目录时启用，不影响普通安装版或开发运行。
+便携版启动时若同时检测到同级 `config.json` 和 `redist\version.txt`，会先检查系统注册表中的 Microsoft Visual C++ 2015-2022 x64 Runtime 版本；若缺失或版本偏旧，会弹窗提示并拉起内置的 `redist\vc_redist.x64.exe`。
 
-## 主要产物
+## 运行时分发机制
 
-Tauri 默认产物：
-
-```text
-src-tauri\target\release\vekai.exe
-src-tauri\target\release\bundle\nsis\Vekai_0.1.10_x64-setup.exe
-```
-
-仓库交付目录可能包含同步副本：
-
-```text
-release\Vekai 0.1.10\Vekai.exe
-release\Vekai 0.1.10\Vekai_0.1.10_x64-setup.exe
-```
-
-如果版本号或产品名变化，要同步：
-
-- `src-tauri/tauri.conf.json`
-- `README_ZH.md`
-- `README.md`
-- 本文档
-
-## 运行时
-
-llama.cpp runtime 不进 Git，也不通过 `include_bytes!` 编进 exe。发布和本地打包前使用 `scripts/prepare-bundled-runtime.ps1` 从 `ggml-org/llama.cpp` 最新 GitHub Release 自动选择当前平台 runtime，并保存到：
-
-```text
-bundle-resources\downloads
-```
-
-Tauri 打包会把该目录映射到安装包资源目录的 `downloads/`。应用启动服务时会按顺序搜索：
+`llama.cpp` 运行时打包在安装包的 `downloads/` 资源目录中，首次启动服务时解压至 `%LOCALAPPDATA%\Vekai\runtimes`。启动时按以下优先级查找运行时归档：
 
 ```text
 %LOCALAPPDATA%\Vekai\downloads
@@ -70,169 +48,67 @@ Tauri 打包会把该目录映射到安装包资源目录的 `downloads/`。应�
 <repo>\downloads
 ```
 
-找到 runtime archive 后解压到：
+因此，将新版或特定后端的运行时放到 `%LOCALAPPDATA%\Vekai\downloads` 或程序同级 `downloads\` 目录下即可直接覆盖内置运行时。
 
-```text
-%LOCALAPPDATA%\Vekai\runtimes
-```
+各平台对应的运行时归档：
 
-运行时 marker 使用 archive 文件名、大小和 SHA256 判断是否需要重新解压。文件名与大小未变化时直接复用，避免每次启动重复扫描大 archive；首次安装或元数据变化时才计算 SHA256。更新 runtime 不要求改代码，但每个平台安装包必须包含对应平台的 `downloads\llama-b*-bin-<platform>.*`。本机数据目录和 exe 同级 `downloads\` 仍可用于调试或临时覆盖安装包内置 runtime。
-
-支持的 runtime 平台：
-
-| 平台 | 下载脚本参数 | llama.cpp asset |
+| 平台 | 脚本参数 | `llama.cpp` 资产名称 |
 | --- | --- | --- |
-| Windows x64 | `windows-x64` | 默认 `llama-b*-bin-win-cpu-x64.zip`；`-WindowsBackend vulkan` 显式下载 Vulkan；`-WindowsBackend cuda` 下载 CUDA 12.4 主包和 cudart companion |
+| Windows x64 | `windows-x64` | 默认 `llama-b*-bin-win-cpu-x64.zip`；可选 `-WindowsBackend vulkan` 或 `-WindowsBackend cuda`（含 `cudart`） |
 | Windows ARM64 | `windows-arm64` | `llama-b*-bin-win-cpu-arm64.zip` |
-| Ubuntu/Linux x64 | `ubuntu-x64` | `llama-b*-bin-ubuntu-x64.tar.gz` |
-| Ubuntu/Linux ARM64 | `ubuntu-arm64` | `llama-b*-bin-ubuntu-arm64.tar.gz` |
+| Ubuntu / Linux x64 | `ubuntu-x64` | `llama-b*-bin-ubuntu-x64.tar.gz` |
+| Ubuntu / Linux ARM64 | `ubuntu-arm64` | `llama-b*-bin-ubuntu-arm64.tar.gz` |
 | macOS x64 | `macos-x64` | `llama-b*-bin-macos-x64.tar.gz` |
 | macOS ARM64 | `macos-arm64` | `llama-b*-bin-macos-arm64.tar.gz` |
 
-## 模型交付
+## 模型与 Fastpath 资产分发
 
-模型文件不进 Git，也不要求打进安装包。用户在设置页分别为 Rerank 和 Embedding 选择 `.gguf` 文件路径。默认模型由 `scripts/assets.json` 定义，并由下载脚本保存到 `models\`。
+### 默认 GGUF 模型
 
-下载脚本默认模型：
+安装包默认不包含模型权重。通过 `scripts/download-assets.ps1` 下载的默认模型保存在 `models\` 目录：
 
 ```text
 models\bge-reranker-v2-m3-Q4_K_M.gguf
-models\Qwen3-Embedding-0.6B-Q8_0.gguf
+models\embeddinggemma-2-Q8_0.gguf
+models\mmproj-embeddinggemma-2-Q8_0.gguf
 ```
 
-给客户交付时可以选择两种方式：
+EmbeddingGemma 2 主模型与 `mmproj-embeddinggemma-2-Q8_0.gguf` 需保持在同一目录，配置中只需指定主模型 `embeddinggemma-2-Q8_0.gguf`，且要求 `llama.cpp` 版本不低于 b11457。
 
-1. 安装包加单独模型文件，让用户在设置页选择模型路径。
-2. 绿色目录包含 exe、`models\`、`downloads\` 和 exe 同级 `config.json`。存在该配置文件时应用进入便携配置模式，优先读取并保存它；`model_path` 可以使用相对 exe 目录的路径，例如 `models\bge-reranker-v2-m3-Q4_K_M.gguf`。
+主模型和编码器固定使用 `ggml-org/embeddinggemma-2-GGUF` revision `6ea3e3a309d12a4779cfda98b8c19800d2d5da71`，文件大小与 SHA256 记录在 `scripts/assets.json`。下载脚本支持从最新 Release 的 `nightly-tag.txt` 解析实际运行时版本。EmbeddingGemma 2 默认通过 llama.cpp 运行，Qwen 专用 ONNX 快路径不适用于该模型。
 
-不要把代码改成硬编码某个开发机路径。
+### ONNX Runtime CUDA 快路径（可选）
 
-便携配置只改变配置文件位置和相对模型路径解析。日志与首次解压的 llama.cpp runtime 仍写入 `%LOCALAPPDATA%\Vekai`，避免在只读交付介质或受限目录中运行失败。
-
-## Windows/Linux Embedding 快路径
-
-Windows x64 和 Linux x64 安装包包含约 5 MB 的原生 Rust sidecar 和 562 KiB ONNX 瘦图，不包含 FP16 外部权重或 GPU 动态库。NVIDIA 用户在源码/交付脚本目录运行：
+Windows x64 和 Linux x64 安装包已内置原生 Rust sidecar 与 ONNX 结构图。如需为 `Qwen3-Embedding-0.6B` 启用 ORT CUDA 快路径，可在目标机器运行：
 
 ```powershell
+# Windows
 powershell -ExecutionPolicy Bypass -File scripts\download-fastpath.ps1
-```
 
-Linux 使用 PowerShell 7：
-
-```bash
+# Linux
 pwsh -File scripts/download-fastpath.ps1
 ```
 
-脚本在 Windows 把资产安装到 `%LOCALAPPDATA%\Vekai\fastpath`，在 Linux 安装到 `$XDG_DATA_HOME/Vekai/fastpath`，未设置时使用 `~/.local/share/Vekai/fastpath`。所有文件成功后最后写平台感知的 `manifest.json`。Windows 使用 wheel 作为下载容器；Linux 的 ORT 使用官方 GPU tarball，NVIDIA 库使用 wheel。下载归档默认在成功后删除，安装目录不包含 Python、PyTorch 或 TensorRT。Vekai 仅在选择 `Qwen3-Embedding-0.6B*.gguf` 时自动启用，其他模型和其他平台继续使用 llama.cpp。
+该脚本会将 FP16 权重及固定版本的 ONNX Runtime / CUDA / cuDNN 动态库安装到 `%LOCALAPPDATA%\Vekai\fastpath`（Linux 下为 `$XDG_DATA_HOME/Vekai/fastpath` 或 `~/.local/share/Vekai/fastpath`），并在校验通过后生成 `manifest.json`（schema 2）。
 
-平台感知 manifest 使用 schema 2。已有 Windows fastpath 用户升级后需要重新运行下载脚本生成新 manifest；旧 schema 或其他平台的 manifest 会被拒绝并安全回退 llama.cpp。
+## GitHub Release 自动发布
 
-Windows x64 和 Ubuntu x64 release workflow 必须先运行 `scripts\build-fastpath.ps1`。sidecar 是生成物，不提交 Git；FP16 权重和 CUDA 动态库也不进入 Git 或安装包。
+`.github/workflows/release.yml` 负责跨平台构建与发布：
 
-## 打包前检查
-
-```powershell
-git diff --check
-powershell -ExecutionPolicy Bypass -File scripts\prepare-bundled-runtime.ps1
-npm run verify:icons
-npm run build
-cargo test --manifest-path src-tauri/Cargo.toml
-cargo test --release --locked --manifest-path src-fastpath/Cargo.toml
-powershell -ExecutionPolicy Bypass -File scripts\build-fastpath.ps1
-npm run tauri:build
-```
-
-`src-fastpath` 测试和构建适用于 Windows x64 和 Linux x64；其他平台跳过这两项。
-
-如果只改文档，可以只跑 `git diff --check` 并说明没有重打包。
-
-## GitHub Release 工作流
-
-`.github/workflows/release.yml` 在推送 `vMAJOR.MINOR.PATCH` tag 时触发，例如：
+- **日常回归构建**：推送到 `master` 分支时自动运行六平台矩阵构建（Windows x64/ARM64、macOS x64/ARM64、Ubuntu x64/ARM64），产物上传至 Actions Artifacts。
+- **正式版本发布**：推送 `vMAJOR.MINOR.PATCH` 标签（或手动触发工作流并指定 tag）时，先校验 `package.json`、`src-tauri/Cargo.toml` 和 `src-tauri/tauri.conf.json` 版本号一致，随后构建并将各平台安装包发布到 GitHub Release。
 
 ```powershell
-git tag v0.1.10
+git tag v0.1.11
 git push origin master
-git push origin v0.1.10
+git push origin v0.1.11
 ```
 
-工作流会先校验 tag 版本号与以下文件一致：
+Linux `.deb` 安装包还会附带 `systemd` 服务说明与示例单元文件（位于 `/usr/share/doc/vekai/`）。
 
-- `package.json`
-- `src-tauri/Cargo.toml`
-- `src-tauri/tauri.conf.json`
+## 发布前检查清单
 
-然后分别构建并上传这些平台安装包：
-
-- Windows x64
-- Windows ARM64
-- macOS x64
-- macOS ARM64
-- Ubuntu x64
-- Ubuntu ARM64
-
-工作流会在各平台构建前下载对应平台的 llama.cpp runtime archive，并把它打进安装包资源目录；Release 页面发布安装包产物，不再要求用户单独下载 runtime archive。模型仍按本文档“模型交付”章节处理，不进安装包。
-
-如果需要重跑某个已存在 tag 的发布，可以在 GitHub Actions 页面手动运行 `Release` 工作流并输入 tag，例如 `v0.1.10`。工作流会覆盖同名 Release asset。
-
-工作流也监听 `master` 分支 push，并使用与正式 Release 相同的六平台矩阵构建安装包。构建结果只上传到该次 GitHub Actions run 的 artifacts，不创建或修改 GitHub Release；这样可以在打 tag 前发现平台打包回归。只有 tag push 或手动输入 tag 时才会创建或更新 GitHub Release。
-
-macOS 的 DMG 阶段遇到 runner 挂载或 `hdiutil` 瞬态失败时会自动清理残留卷和 DMG 临时目录，并只重试一次。第二次失败仍会让工作流失败，避免掩盖可重复的打包问题。
-
-Windows x64 和 Ubuntu x64 job 会在 Tauri 打包前运行 `src-fastpath` release 模式测试并生成对应平台 sidecar；其他平台跳过 fastpath sidecar，但仍会把仓库中的 ONNX 瘦图作为普通资源打进安装包。
-
-Linux `.deb` 包会额外包含服务模式说明文件：
-
-```text
-/usr/share/doc/vekai/README-service.md
-/usr/share/doc/vekai/examples/vekai.service
-```
-
-应用资源目录也会包含同一份 `linux-service/` 文件，方便 GUI 包内查看或复制。
-
-## 冒烟检查
-
-发布前至少检查：
-
-- 双击 exe 不出现终端窗口。
-- 便携包 exe 同级 `config.json` 使用相对模型路径，移动整个目录后仍可启动两个服务。
-- 便携包包含 `redist\vc_redist.x64.exe` 和版本元数据；缺失或旧版 VC++ x64 Runtime 会先触发安装提示，不会启动 llama.cpp。
-- 启动后先打开设置窗口。
-- 设置窗口可切换中文/英文。
-- 可以为两个服务选择 `.gguf` 模型。
-- `bundle-resources\downloads\` 中存在且仅存在当前平台的 `llama-b*-bin-<platform>.*`。
-- Linux 上 `vekai serve` 可以以前台服务模式启动。
-- Linux 上 `vekai install-service` 会安装用户级 systemd unit。
-- 启动服务后“启动服务”按钮不可点。
-- 设置页可配置线程数、并发槽位和 HTTP 线程数，`0` 表示由 llama.cpp 自动决定。
-- 关闭设置窗口会询问最小化到托盘或退出。
-- 最小化到托盘后服务继续运行。
-- 日志目录为 `%LOCALAPPDATA%\Vekai\logs`。
-- 默认 Rerank 地址可访问 `/v1/rerank`。
-- 默认 Embedding 地址可访问 `/v1/embeddings`。
-- 安装 fastpath 资产并选择 Qwen3-Embedding-0.6B 后，Embedding `/health` 返回 `backend: ort_cuda`。
-- 强制结束 sidecar 后，8013 自动由 llama.cpp 恢复并继续返回 1024 维向量。
-
-## 常见交付问题
-
-**安装包是否包含前端资源？**
-
-是。Tauri 构建会把 `npm run build` 产生的前端资源打进应用。
-
-**安装包是否包含 llama.cpp 运行时？**
-
-包含。每个平台安装包会内置对应平台的 llama.cpp runtime archive，首次启动服务时解压到 `%LOCALAPPDATA%\Vekai\runtimes`。本机数据目录或 exe 同级 `downloads\` 中的匹配 archive 可用于临时覆盖。
-
-Windows x64 通用安装包默认内置 CPU runtime，避免绑定显卡和驱动。NVIDIA 交付可执行 `scripts\prepare-bundled-runtime.ps1 -WindowsBackend cuda` 构建 CUDA 专用安装包；CUDA 主包和 cudart companion 必须同时存在。需要 Vulkan 专用包时显式传入 `-WindowsBackend vulkan`。应用按完整 CUDA、CPU、Vulkan 的顺序选择可用 runtime。
-
-**安装包是否必须包含模型？**
-
-不是。模型路径由用户在设置页选择。默认模型可以通过 `scripts\download-assets.ps1` 下载到 `models\`，也可以替换为客户自己的 GGUF 文件。
-
-**旧日志目录还会被使用吗？**
-
-不会。当前目录是 `%LOCALAPPDATA%\Vekai\logs`。`LocalRerankServer` 只可能是旧开发版本遗留。
-
-**客户机器没有 Vulkan 能力怎么办？**
-
-先把 GPU 层数设置为 `0` 验证 CPU 路径。如果 CPU 可运行，再检查显卡驱动、Vulkan 支持和 GPU 层数设置。
+- [ ] 版本号在 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 中保持一致。
+- [ ] Windows 下双击启动不弹出命令行窗口，关闭主窗口时正常提示最小化到托盘或退出。
+- [ ] 便携包移动目录后仍可通过相对路径正常启动 Rerank（`8012`）与 Embedding（`8013`）服务。
+- [ ] Linux 下 `vekai serve` 与 `vekai install-service` 工作正常。

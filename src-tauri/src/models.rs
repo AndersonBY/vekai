@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use crate::service::ServiceKind;
 
+const DEFAULT_EMBEDDING_MODEL_NAME: &str = "embeddinggemma-2-Q8_0.gguf";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelInfo {
     pub name: String,
@@ -57,6 +59,9 @@ pub fn discover_models(
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .context("model path has no filename")?;
+        if name.to_lowercase().starts_with("mmproj-") {
+            continue;
+        }
         let selected = configured_model
             .as_ref()
             .is_some_and(|configured_model| configured_model == &path);
@@ -102,6 +107,15 @@ pub fn choose_default_model_for_service(
         .iter()
         .find(|model| model.selected)
         .or_else(|| {
+            if service == ServiceKind::Embedding {
+                models.iter().find(|model| {
+                    model.name.eq_ignore_ascii_case(DEFAULT_EMBEDDING_MODEL_NAME)
+                })
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
             models.iter().find(|model| {
                 let name = model.name.to_lowercase();
                 match service {
@@ -127,6 +141,8 @@ mod tests {
         fs::write(models_dir.join("zeta.GGUF"), b"12345").expect("model should be written");
         fs::write(models_dir.join("Alpha.gguf"), b"123").expect("model should be written");
         fs::write(models_dir.join("notes.txt"), b"not a model").expect("file should be written");
+        fs::write(models_dir.join("mmproj-embeddinggemma-2-Q8_0.gguf"), b"projector")
+            .expect("projector should be written");
         fs::create_dir(models_dir.join("nested.gguf")).expect("nested dir should be created");
         fs::write(
             models_dir.join("nested.gguf").join("ignored.gguf"),
@@ -280,6 +296,34 @@ mod tests {
         assert_eq!(
             choose_default_model_for_service(ServiceKind::Embedding, &[first, selected.clone()]),
             Some(selected)
+        );
+    }
+
+    #[test]
+    fn default_embedding_prefers_gemma_over_qwen_but_preserves_selection() {
+        let qwen = ModelInfo {
+            name: "Qwen3-Embedding-0.6B-Q8_0.gguf".to_string(),
+            path: "Qwen3-Embedding-0.6B-Q8_0.gguf".into(),
+            size_bytes: 1,
+            selected: false,
+        };
+        let gemma = ModelInfo {
+            name: DEFAULT_EMBEDDING_MODEL_NAME.to_string(),
+            path: DEFAULT_EMBEDDING_MODEL_NAME.into(),
+            size_bytes: 1,
+            selected: false,
+        };
+        assert_eq!(
+            choose_default_model_for_service(ServiceKind::Embedding, &[qwen.clone(), gemma.clone()]),
+            Some(gemma.clone())
+        );
+        let selected_qwen = ModelInfo {
+            selected: true,
+            ..qwen
+        };
+        assert_eq!(
+            choose_default_model_for_service(ServiceKind::Embedding, &[gemma, selected_qwen.clone()]),
+            Some(selected_qwen)
         );
     }
 

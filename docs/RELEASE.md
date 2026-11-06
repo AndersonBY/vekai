@@ -21,7 +21,7 @@ Windows 默认构建产物位于：
 
 ```text
 src-tauri\target\release\vekai.exe
-src-tauri\target\release\bundle\nsis\Vekai_0.1.12_x64-setup.exe
+src-tauri\target\release\bundle\nsis\Vekai_0.1.13_x64-setup.exe
 ```
 
 ### 构建 Windows 便携包（Portable ZIP）
@@ -52,6 +52,8 @@ pwsh -File scripts\build-portable-windows.ps1 -WindowsBackend cuda
 
 启用 EmbeddingGemma 2 时会跳过低于 b11457 的归档。旧 CUDA 缓存不满足模型要求时，应用会继续寻找其他目录中的兼容 CUDA，随后尝试兼容 CPU / Vulkan；没有兼容版本时提示更新运行时。Windows CUDA 用户可运行 `pwsh -File scripts/download-assets.ps1 -SkipModels -WindowsBackend cuda` 更新实际优先使用的本机下载目录。
 
+启用默认 Qwen3-VL 多模态重排时最低要求提高到 b12110，两个服务共享运行时并取启用模型要求的最大值。
+
 各平台对应的运行时归档：
 
 | 平台 | 脚本参数 | `llama.cpp` 资产名称 |
@@ -70,12 +72,15 @@ pwsh -File scripts\build-portable-windows.ps1 -WindowsBackend cuda
 安装包默认不包含模型权重。通过 `scripts/download-assets.ps1` 下载的默认模型保存在 `models\` 目录：
 
 ```text
-models\bge-reranker-v2-m3-Q4_K_M.gguf
+models\Qwen3-VL-Reranker-2B.Q8_0.gguf
+models\Qwen3-VL-Reranker-2B.mmproj-f16.gguf
 models\embeddinggemma-2-Q8_0.gguf
 models\mmproj-embeddinggemma-2-Q8_0.gguf
 ```
 
 EmbeddingGemma 2 主模型与 `mmproj-embeddinggemma-2-Q8_0.gguf` 需保持在同一目录，配置中只需指定主模型 `embeddinggemma-2-Q8_0.gguf`，且要求 `llama.cpp` 版本不低于 b11457。
+
+Qwen3-VL-Reranker-2B 的 Q8_0 主模型与 F16 投影文件固定使用 `bealore/Qwen3-VL-Reranker-2B-GGUF` revision `5dc74c6bf8b65a8b47b1b0e1d6c0cbdba16c7f31`。主模型约 1.83 GB、投影文件约 0.82 GB，大小和 SHA256 均记录在清单中。只需选择主模型，要求运行时 b12110 及以上。默认重排槽位为 1，已有显式 BGE 选择不会被覆盖。安装包不含这些权重，便携包会包含清单中的全部四个模型/投影文件。
 
 主模型和编码器固定使用 `ggml-org/embeddinggemma-2-GGUF` revision `6ea3e3a309d12a4779cfda98b8c19800d2d5da71`，文件大小与 SHA256 记录在 `scripts/assets.json`。下载脚本支持从最新 Release 的 `nightly-tag.txt` 解析实际运行时版本。EmbeddingGemma 2 默认通过 llama.cpp 运行，Qwen 专用 ONNX 快路径不适用于该模型。
 
@@ -116,15 +121,16 @@ pwsh -File scripts/download-fastpath.ps1
 GitHub 已于 2026-11-02 下线 macOS 14 runner，不能再使用 `macos-14`（见[官方公告](https://github.blog/changelog/2026-10-01-github-actions-macos-14-runner-image-retirement/)）。
 
 ```powershell
-git tag v0.1.12
-git push origin master
-git push origin v0.1.12
+git tag v0.1.13
+git push --atomic origin master v0.1.13
 ```
+
+同时推送分支和标签会触发两次工作流。正式发布时保留 `v0.1.13` 标签运行，取消同一提交的 `master` 回归运行，避免重复构建；不要取消标签运行。
 
 若版本标签创建后需要修复工作流，先将工作流修复提交推送到 `master`，再从 `master` 手动调度该版本。工作流定义取自 `master`，应用源码仍检出指定标签，避免移动已发布的版本标签。直接重新运行旧作业会继续使用旧工作流定义。
 
 ```powershell
-gh workflow run release.yml --ref master -f tag=v0.1.12
+gh workflow run release.yml --ref master -f tag=v0.1.13
 ```
 
 Linux `.deb` 安装包还会附带 `systemd` 服务说明与示例单元文件（位于 `/usr/share/doc/vekai/`）。

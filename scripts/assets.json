@@ -38,12 +38,20 @@
   },
   "models": [
     {
-      "id": "rerank-bge-reranker-v2-m3-q4-k-m",
+      "id": "rerank-qwen3-vl-reranker-2b-q8-0",
       "service": "rerank",
-      "fileName": "bge-reranker-v2-m3-Q4_K_M.gguf",
-      "url": "https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF/resolve/main/bge-reranker-v2-m3-Q4_K_M.gguf",
-      "sizeBytes": 438376864,
-      "sha256": "e186a244ed455b4ab66ec64339ce7427a6ae13f5c0b5e544de96e50f0f8b3673"
+      "fileName": "Qwen3-VL-Reranker-2B.Q8_0.gguf",
+      "url": "https://huggingface.co/bealore/Qwen3-VL-Reranker-2B-GGUF/resolve/5dc74c6bf8b65a8b47b1b0e1d6c0cbdba16c7f31/Qwen3-VL-Reranker-2B.Q8_0.gguf",
+      "sizeBytes": 1834435360,
+      "sha256": "c8ec74b99e90cfba08a14753cd8331f6c1711a7723fb1cc560510fe92ad8a340"
+    },
+    {
+      "id": "rerank-qwen3-vl-reranker-2b-mmproj-f16",
+      "service": "rerank_projector",
+      "fileName": "Qwen3-VL-Reranker-2B.mmproj-f16.gguf",
+      "url": "https://huggingface.co/bealore/Qwen3-VL-Reranker-2B-GGUF/resolve/5dc74c6bf8b65a8b47b1b0e1d6c0cbdba16c7f31/Qwen3-VL-Reranker-2B.mmproj-f16.gguf",
+      "sizeBytes": 822541024,
+      "sha256": "dd03217d1dedaa51bd7cf16313fa9d5e4dda4940c354486bed9b512e802124de"
     },
     {
       "id": "embedding-embeddinggemma-2-q8-0",

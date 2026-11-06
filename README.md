@@ -70,6 +70,27 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:8013/v1/embeddings' -Method Post `
 
 You can also include `@{ type = 'text'; text = 'Image description' }` in the same `content` array to produce a combined text-and-image vector.
 
+### Multimodal reranking
+
+The default reranker is [Qwen3-VL-Reranker-2B](https://huggingface.co/Qwen/Qwen3-VL-Reranker-2B) Q8_0. The asset downloader supplies `Qwen3-VL-Reranker-2B.Q8_0.gguf` and `Qwen3-VL-Reranker-2B.mmproj-f16.gguf`; keep them together and select the main model. This conversion requires llama.cpp b12110 or newer. Saved BGE selections remain valid.
+
+Multimodal reranking defaults to one slot, 8192 context tokens per slot, and at most 1280 visual tokens per image. Use one rerank slot when running both default models on an 8GB GPU. More slots consume more VRAM. Images are resized to fit the visual token budget; evaluate small-text accuracy for your data. See [measured performance](docs/PERFORMANCE.md).
+
+POST this body to `http://127.0.0.1:8012/v1/rerank`:
+
+```json
+{
+  "query": "A photograph of a cat",
+  "documents": [
+    {"image": "data:image/jpeg;base64,<image-base64>"},
+    {"text": "A photograph", "image": "data:image/png;base64,<image-base64>"}
+  ],
+  "top_n": 2
+}
+```
+
+Both queries and documents accept strings or objects with `text` and/or `image`. Image queries use `"query": {"image": "data:image/png;base64,..."}`. Native and proxied protocols preserve these inputs. Proxy request bodies are bounded at 32 MiB and responses omit image data. This is a Vekai/llama.cpp extension; clients must support these fields.
+
 ## Features
 
 - **Dual Services**: Run Embedding and Rerank together or independently.

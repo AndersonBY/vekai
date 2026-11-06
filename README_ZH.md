@@ -29,6 +29,10 @@ pwsh -File scripts\download-assets.ps1 -SkipRuntime
 
 默认 Embedding 模型为 [EmbeddingGemma 2](https://ai.google.dev/gemma/docs/embeddinggemma) Q8_0（768 维，支持文本与图片嵌入）。脚本会同时下载主模型 `embeddinggemma-2-Q8_0.gguf` 和多模态编码器 `mmproj-embeddinggemma-2-Q8_0.gguf`。将两个文件放在同一目录下，在设置页选择主模型即可，Vekai 会自动加载配套编码器。
 
+默认 Rerank 模型为 [Qwen3-VL-Reranker-2B](https://huggingface.co/Qwen/Qwen3-VL-Reranker-2B) Q8_0，支持文字、图片和图文混合重排序。脚本同时下载 `Qwen3-VL-Reranker-2B.Q8_0.gguf` 与 `Qwen3-VL-Reranker-2B.mmproj-f16.gguf`，两者需放在同一目录，设置页选择主模型即可。该转换要求 llama.cpp b12110 及以上；已有 BGE 配置继续保留，升级后可手动切换。
+
+多模态重排未设置并发时使用 1 个槽位，每槽 8192 tokens，图片最多编码为 1280 个视觉 tokens。8GB 显存同时运行两个默认模型时，建议重排并发设为 `1`；增加槽位会增加显存需求。图片会按视觉 token 预算缩放，细小文字的识别效果需自行评估。实测条件与耗时见 [性能记录](docs/PERFORMANCE.md)。
+
 从旧版本升级时，请确保 `llama.cpp` 版本不低于 b11457（去掉 `-SkipRuntime` 重新运行下载脚本即可更新运行时；Windows CUDA 用户可附加 `-WindowsBackend cuda`）。切换不同 Embedding 模型后，需要重新生成业务侧的向量索引。
 
 EmbeddingGemma 2 未设置物理批大小时，Vekai 自动使其与逻辑批大小一致（默认 `2048` tokens）。单条输入必须完整放入一个物理批；处理更长文本时，请同时提高逻辑批和物理批大小。
@@ -69,6 +73,23 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:8013/v1/embeddings' -Method Post `
 ```
 
 同一个 `content` 数组里也可以同时传入 `@{ type = 'text'; text = '图片说明' }`，生成图文联合向量。
+
+### 多模态重排序
+
+`query` 和 `documents` 的每个元素可使用字符串或包含 `text`、`image` 的对象，`image` 使用图片 data URI。以下为文字查询两张图片的请求体：
+
+```json
+{
+  "query": "一只猫的照片",
+  "documents": [
+    {"image": "data:image/jpeg;base64,<第一张图片的base64>"},
+    {"text": "照片", "image": "data:image/png;base64,<第二张图片的base64>"}
+  ],
+  "top_n": 2
+}
+```
+
+向 `http://127.0.0.1:8012/v1/rerank` POST JSON 即可。图片查询可写为 `"query": {"image": "data:image/png;base64,..."}`。原生与内置代理均保留多模态输入；第三方协议代理的请求体上限为 32 MiB，响应仅返回文档文字与评分，不回传图片数据。这是 Vekai/llama.cpp 的扩展格式，第三方客户端也需支持发送这些字段。
 
 ## 功能特性
 

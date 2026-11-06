@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::config::{AppConfig, ConfigError};
-use crate::models::embeddinggemma_projector_path;
+use crate::models::{embeddinggemma_projector_path, qwen_vl_rerank_projector_path};
 use crate::service::ServiceKind;
 
 pub fn build_llama_server_args(
@@ -39,6 +39,11 @@ pub fn build_service_llama_server_args_for_endpoint(
     } else {
         None
     };
+    let rerank_projector = if service == ServiceKind::Rerank {
+        qwen_vl_rerank_projector_path(model_path)
+    } else {
+        None
+    };
 
     let mut args = vec![
         "-m".to_string(),
@@ -52,7 +57,11 @@ pub fn build_service_llama_server_args_for_endpoint(
             "rank".to_string(),
             "--rerank".to_string(),
         ]);
-    } else if let Some(projector_path) = &embeddinggemma_projector {
+    }
+    if let Some(projector_path) = embeddinggemma_projector
+        .as_ref()
+        .or(rerank_projector.as_ref())
+    {
         if !projector_path.is_file() {
             return Err(ConfigError::MissingMultimodalProjector {
                 path: projector_path.to_string_lossy().into_owned(),
@@ -98,6 +107,20 @@ pub fn build_service_llama_server_args_for_endpoint(
     } else {
         config.parallel_slots
     };
+    let parallel_slots = if rerank_projector.is_some() {
+        parallel_slots.max(1)
+    } else {
+        parallel_slots
+    };
+    if rerank_projector.is_some() {
+        // Bound vision work and reserve enough context per slot for image pairs.
+        args.extend([
+            "--ctx-size".to_string(),
+            (8192u32 * u32::from(parallel_slots)).to_string(),
+            "--image-max-tokens".to_string(),
+            "1280".to_string(),
+        ]);
+    }
     if parallel_slots > 0 {
         args.push("--parallel".to_string());
         args.push(parallel_slots.to_string());
@@ -191,6 +214,38 @@ mod tests {
                 "auto",
             ]
         );
+    }
+
+    #[test]
+    fn qwen_vl_rerank_loads_vision_and_reserves_context_per_slot() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = dir.path().join("Qwen3-VL-Reranker-2B.Q8_0.gguf");
+        let projector = dir.path().join("Qwen3-VL-Reranker-2B.mmproj-f16.gguf");
+        let mut config = AppConfig::default();
+        assert!(matches!(
+            build_llama_server_args(&config, &model),
+            Err(ConfigError::MissingMultimodalProjector { .. })
+        ));
+        std::fs::write(&projector, b"projector").unwrap();
+        let defaults = build_llama_server_args(&config, &model).unwrap();
+        assert!(defaults.windows(2).any(|p| p == ["--parallel", "1"]));
+        assert!(defaults.windows(2).any(|p| p == ["--ctx-size", "8192"]));
+        config.gpu_layers = "0".into();
+        config.rerank.parallel_slots = 3;
+        let args = build_llama_server_args(&config, &model).unwrap();
+        for pair in [
+            ["--pooling", "rank"],
+            ["--ctx-size", "24576"],
+            ["--image-max-tokens", "1280"],
+            ["--parallel", "3"],
+        ] {
+            assert!(args.windows(2).any(|p| p == pair));
+        }
+        assert!(args
+            .windows(2)
+            .any(|p| p == ["--mmproj", &projector.to_string_lossy()]));
+        assert!(args.iter().any(|p| p == "--no-mmproj-offload"));
+        assert!(!args.iter().any(|p| p == "--ubatch-size"));
     }
 
     #[test]

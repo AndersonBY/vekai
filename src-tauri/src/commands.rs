@@ -3,7 +3,8 @@ use crate::fastpath::discover_embedding_fastpath;
 use crate::logging::{append_log, log_paths, LogPaths};
 use crate::models::{
     choose_default_model_for_service, discover_model_catalog, discover_models,
-    embeddinggemma_projector_path, ModelCatalog, EMBEDDINGGEMMA_MIN_LLAMA_BUILD,
+    embeddinggemma_projector_path, qwen_vl_rerank_projector_path, ModelCatalog,
+    EMBEDDINGGEMMA_MIN_LLAMA_BUILD, QWEN_VL_RERANK_MIN_LLAMA_BUILD,
 };
 use crate::process::ProcessManager;
 use crate::protocol_proxy::protocol_public_path;
@@ -521,16 +522,26 @@ async fn snapshot(state: &SharedAppState) -> AppSnapshot {
 }
 
 fn required_runtime_build(model_base_dir: &Path, config: &AppConfig) -> u64 {
+    let mut minimum = 0;
+    if config.rerank.enabled {
+        if let Ok(model_path) =
+            selected_service_model_path(model_base_dir, config, ServiceKind::Rerank)
+        {
+            if qwen_vl_rerank_projector_path(&model_path).is_some() {
+                minimum = QWEN_VL_RERANK_MIN_LLAMA_BUILD;
+            }
+        }
+    }
     if config.embedding.enabled {
         if let Ok(model_path) =
             selected_service_model_path(model_base_dir, config, ServiceKind::Embedding)
         {
             if embeddinggemma_projector_path(&model_path).is_some() {
-                return EMBEDDINGGEMMA_MIN_LLAMA_BUILD;
+                minimum = minimum.max(EMBEDDINGGEMMA_MIN_LLAMA_BUILD);
             }
         }
     }
-    0
+    minimum
 }
 
 fn selected_service_model_path(
@@ -1347,8 +1358,16 @@ mod tests {
     fn runtime_requirement_follows_enabled_embedding_model_selection() {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir(dir.path().join("models")).unwrap();
-        fs::write(dir.path().join("models/embeddinggemma-2-Q8_0.gguf"), b"gemma").unwrap();
-        fs::write(dir.path().join("models/Qwen3-Embedding-0.6B-Q8_0.gguf"), b"qwen").unwrap();
+        fs::write(
+            dir.path().join("models/embeddinggemma-2-Q8_0.gguf"),
+            b"gemma",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("models/Qwen3-Embedding-0.6B-Q8_0.gguf"),
+            b"qwen",
+        )
+        .unwrap();
         let mut config = AppConfig::default();
         assert_eq!(required_runtime_build(dir.path(), &config), 11457);
 
@@ -1358,6 +1377,17 @@ mod tests {
         assert_eq!(required_runtime_build(dir.path(), &config), 11457);
         config.embedding.enabled = false;
         assert_eq!(required_runtime_build(dir.path(), &config), 0);
+        fs::write(
+            dir.path().join("models/Qwen3-VL-Reranker-2B.Q8_0.gguf"),
+            b"vl",
+        )
+        .unwrap();
+        config.rerank.model_path = "models/Qwen3-VL-Reranker-2B.Q8_0.gguf".into();
+        assert_eq!(required_runtime_build(dir.path(), &config), 12110);
+        config.embedding.enabled = true;
+        assert_eq!(required_runtime_build(dir.path(), &config), 12110);
+        config.rerank.enabled = false;
+        assert_eq!(required_runtime_build(dir.path(), &config), 11457);
     }
 
     #[test]

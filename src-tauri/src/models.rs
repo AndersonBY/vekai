@@ -6,7 +6,17 @@ use std::path::{Path, PathBuf};
 use crate::service::ServiceKind;
 
 const DEFAULT_EMBEDDING_MODEL_NAME: &str = "embeddinggemma-2-Q8_0.gguf";
+const DEFAULT_RERANK_MODEL_NAME: &str = "Qwen3-VL-Reranker-2B.Q8_0.gguf";
 pub const EMBEDDINGGEMMA_MIN_LLAMA_BUILD: u64 = 11457;
+pub const QWEN_VL_RERANK_MIN_LLAMA_BUILD: u64 = 12110;
+
+pub fn qwen_vl_rerank_projector_path(model_path: &Path) -> Option<PathBuf> {
+    model_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| name.eq_ignore_ascii_case(DEFAULT_RERANK_MODEL_NAME))
+        .map(|_| model_path.with_file_name("Qwen3-VL-Reranker-2B.mmproj-f16.gguf"))
+}
 
 pub fn embeddinggemma_projector_path(model_path: &Path) -> Option<PathBuf> {
     model_path
@@ -68,7 +78,7 @@ pub fn discover_models(
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .context("model path has no filename")?;
-        if name.to_lowercase().starts_with("mmproj-") {
+        if name.to_lowercase().starts_with("mmproj-") || name.to_lowercase().contains(".mmproj-") {
             continue;
         }
         let selected = configured_model
@@ -116,13 +126,13 @@ pub fn choose_default_model_for_service(
         .iter()
         .find(|model| model.selected)
         .or_else(|| {
-            if service == ServiceKind::Embedding {
-                models.iter().find(|model| {
-                    model.name.eq_ignore_ascii_case(DEFAULT_EMBEDDING_MODEL_NAME)
-                })
-            } else {
-                None
-            }
+            let default_name = match service {
+                ServiceKind::Embedding => DEFAULT_EMBEDDING_MODEL_NAME,
+                ServiceKind::Rerank => DEFAULT_RERANK_MODEL_NAME,
+            };
+            models
+                .iter()
+                .find(|model| model.name.eq_ignore_ascii_case(default_name))
         })
         .or_else(|| {
             models.iter().find(|model| {
@@ -150,8 +160,16 @@ mod tests {
         fs::write(models_dir.join("zeta.GGUF"), b"12345").expect("model should be written");
         fs::write(models_dir.join("Alpha.gguf"), b"123").expect("model should be written");
         fs::write(models_dir.join("notes.txt"), b"not a model").expect("file should be written");
-        fs::write(models_dir.join("mmproj-embeddinggemma-2-Q8_0.gguf"), b"projector")
-            .expect("projector should be written");
+        fs::write(
+            models_dir.join("mmproj-embeddinggemma-2-Q8_0.gguf"),
+            b"projector",
+        )
+        .expect("projector should be written");
+        fs::write(
+            models_dir.join("Qwen3-VL-Reranker-2B.mmproj-f16.gguf"),
+            b"projector",
+        )
+        .unwrap();
         fs::create_dir(models_dir.join("nested.gguf")).expect("nested dir should be created");
         fs::write(
             models_dir.join("nested.gguf").join("ignored.gguf"),
@@ -323,7 +341,10 @@ mod tests {
             selected: false,
         };
         assert_eq!(
-            choose_default_model_for_service(ServiceKind::Embedding, &[qwen.clone(), gemma.clone()]),
+            choose_default_model_for_service(
+                ServiceKind::Embedding,
+                &[qwen.clone(), gemma.clone()]
+            ),
             Some(gemma.clone())
         );
         let selected_qwen = ModelInfo {
@@ -331,7 +352,10 @@ mod tests {
             ..qwen
         };
         assert_eq!(
-            choose_default_model_for_service(ServiceKind::Embedding, &[gemma, selected_qwen.clone()]),
+            choose_default_model_for_service(
+                ServiceKind::Embedding,
+                &[gemma, selected_qwen.clone()]
+            ),
             Some(selected_qwen)
         );
     }
@@ -367,5 +391,27 @@ mod tests {
         let models = discover_models(temp_dir.path(), None).expect("missing dir should be ok");
 
         assert!(models.is_empty());
+    }
+
+    #[test]
+    fn default_rerank_prefers_multimodal_but_preserves_saved_selection() {
+        let mut bge = ModelInfo {
+            name: "bge-reranker.gguf".into(),
+            path: "bge-reranker.gguf".into(),
+            size_bytes: 1,
+            selected: false,
+        };
+        let vl = ModelInfo {
+            name: DEFAULT_RERANK_MODEL_NAME.into(),
+            path: DEFAULT_RERANK_MODEL_NAME.into(),
+            size_bytes: 1,
+            selected: false,
+        };
+        assert_eq!(
+            choose_default_model(&[bge.clone(), vl.clone()]),
+            Some(vl.clone())
+        );
+        bge.selected = true;
+        assert_eq!(choose_default_model(&[bge.clone(), vl]), Some(bge));
     }
 }

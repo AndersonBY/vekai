@@ -5,7 +5,7 @@ use crate::protocol_adapter::{
 use crate::service::ServiceKind;
 use anyhow::Context;
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::http::header::{
     ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN,
     CONTENT_TYPE,
@@ -162,6 +162,7 @@ pub async fn start_protocol_proxy(
     let app = Router::new()
         .route("/health", get(health))
         .fallback(proxy_request)
+        .layer(DefaultBodyLimit::max(32 * 1024 * 1024))
         .with_state(state);
     let (shutdown, shutdown_rx) = oneshot::channel();
     let task = tokio::spawn(async move {
@@ -537,5 +538,50 @@ mod tests {
             .local_addr()
             .expect("free port address should be readable")
             .port()
+    }
+
+    #[tokio::test]
+    async fn multimodal_proxy_accepts_large_images_and_bounds_request_size() {
+        let _network_guard = crate::NETWORK_TEST_LOCK.lock().await;
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let backend = Router::new()
+            .route(
+                "/v1/rerank",
+                post(|Json(body): Json<Value>| async move {
+                    assert!(
+                        body["documents"][0]["image"].as_str().unwrap().len() > 2 * 1024 * 1024
+                    );
+                    assert_eq!(body["query"]["text"], "cat");
+                    Json(json!({"results":[{"index":0,"relevance_score":0.9}]}))
+                }),
+            )
+            .layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024));
+        let task = tokio::spawn(async move { axum::serve(listener, backend).await.unwrap() });
+        let port = free_port();
+        let proxy = start_protocol_proxy(ProtocolProxyConfig {
+            service: ServiceKind::Rerank,
+            protocol: "jina_rerank_v1".into(),
+            public_host: "127.0.0.1".into(),
+            public_port: port,
+            llama_base_url: format!("http://{addr}"),
+        })
+        .await
+        .unwrap();
+        let client = reqwest::Client::new();
+        let url = format!("http://127.0.0.1:{port}/v1/rerank");
+        let response = client.post(&url).json(&json!({"query":{"text":"cat"},"documents":[{"image":"A".repeat(3 * 1024 * 1024)}]})).send().await.unwrap();
+        assert!(response.status().is_success());
+        let body = response.text().await.unwrap();
+        assert!(body.len() < 1024);
+        let response = client
+            .post(&url)
+            .body(vec![b' '; 32 * 1024 * 1024 + 1])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::PAYLOAD_TOO_LARGE);
+        proxy.shutdown().await;
+        task.abort();
     }
 }

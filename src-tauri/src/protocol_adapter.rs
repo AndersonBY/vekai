@@ -234,6 +234,11 @@ fn normalized_rerank_item(
         .cloned()
         .or_else(|| documents.get(index).cloned())
         .unwrap_or(Value::Null);
+    let document = if document.get("image").is_some() {
+        json!({"text": document.get("text").cloned().unwrap_or(json!(""))})
+    } else {
+        document
+    };
     let document_text = document_text(&document);
 
     NormalizedRerankItem {
@@ -245,6 +250,9 @@ fn normalized_rerank_item(
 }
 
 fn normalize_document_value(value: &Value) -> Value {
+    if value.get("image").is_some() || value.get("text").is_some_and(Value::is_array) {
+        return value.clone();
+    }
     if let Some(text) = value
         .as_object()
         .and_then(|object| object.get("text"))
@@ -261,6 +269,13 @@ fn normalize_document_value(value: &Value) -> Value {
 }
 
 fn document_text(value: &Value) -> String {
+    if let Some(texts) = value.get("text").and_then(Value::as_array) {
+        return texts
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
     value
         .as_object()
         .and_then(|object| object.get("text"))
@@ -276,6 +291,40 @@ mod tests {
 
     use super::{embedding_request_for_llama, embedding_response_for_protocol};
     use super::{rerank_request_for_llama, rerank_response_for_protocol};
+
+    #[test]
+    fn multimodal_rerank_preserves_inputs_and_omits_response_images() {
+        let image = json!({"image": "data:image/png;base64,secret"});
+        let mixed =
+            json!({"text": ["caption", "detail"], "image": ["data:image/png;base64,secret"]});
+        let (request, docs) = rerank_request_for_llama(
+            "jina_rerank_v1",
+            json!({"query":image,"documents":[image,mixed]}),
+        );
+        assert_eq!(request["query"], image);
+        assert_eq!(request["documents"], json!([image, mixed]));
+        for protocol in [
+            "jina_rerank_v1",
+            "cohere_rerank_v2",
+            "siliconflow",
+            "voyage_rerank_v1",
+            "custom_json_http",
+        ] {
+            let response = rerank_response_for_protocol(
+                protocol,
+                json!({"results":[{"index":0,"relevance_score":0.9},{"index":1,"relevance_score":0.8,"document":mixed}]}),
+                &docs,
+            );
+            assert!(!response.to_string().contains("base64"), "{protocol}");
+            assert!(response.to_string().contains("caption"));
+            if protocol == "cohere_rerank_v2" {
+                assert_eq!(
+                    response["results"][1]["document"]["text"],
+                    "caption\ndetail"
+                );
+            }
+        }
+    }
 
     #[test]
     fn cohere_embedding_protocol_maps_texts_to_openai_request_and_back() {

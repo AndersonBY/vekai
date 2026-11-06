@@ -94,10 +94,11 @@ Public Embedding/Rerank endpoints   Rust app state and config
 ### 参数映射与运行时选择
 
 - `threads`、`parallel_slots`、`batch_size`、`ubatch_size`、`http_threads` 分别对应 `llama-server` 的 `--threads`、`--parallel`、`--batch-size`、`--ubatch-size` 和 `--threads-http`。值为 `0` 时不传该参数，交由 `llama.cpp` 自动决定；单服务下的非零配置会覆盖全局同名配置。
+- Qwen3-VL-Reranker-2B Q8_0 的并发未设置时使用 1 个槽位，每槽预留 8192 tokens 上下文（总 `--ctx-size = 8192 × 槽位数`），并附加 `--image-max-tokens 1280` 控制图片编码开销。服务级和全局显式并发仍优先生效。8GB GPU 同时运行两个默认模型时建议重排并发为 1；增加并发会增加 KV 缓存显存占用。
 - EmbeddingGemma 2 采用非因果注意力，单条输入必须完整放进一个物理批。未显式设置 `ubatch_size` 时，该模型使用有效的 `batch_size`（未设置时为 `2048`），避免 llama.cpp 默认物理批 `512` 导致普通长文本报错。显式设置的服务级或全局物理批仍优先生效；更长输入需要同时提高逻辑批和物理批大小。
 - EmbeddingGemma 2 显式设置并发槽位时，实际物理批大小（逻辑批与物理批的较小值）必须能被槽位数整除，否则 llama.cpp 的 mean pooling 初始化可能触发断言。Vekai 启动前拒绝这种参数组合并给出提示；例如并发 `8`、逻辑批 `2048`、物理批 `2048` 可用，并发 `12` 配合上述批大小不可用。
 - `gpu_layers` 设为 `all` 时会同时传入 `--fit off`，跳过自动显存拟合，强制将全部层加载至 GPU。
-- 由于 Embedding 和 Rerank 请求不需要保留生成式 KV 缓存，启动参数固定附加 `--cache-ram 0` 以节省内存开销。
+- 启动参数固定附加 `--cache-ram 0`，禁用额外的主机提示缓存。Qwen3-VL 因果重排在推理时仍需要 KV 缓存，其显存占用随总上下文及槽位数增加。
 - 子进程日志固定附加 `--log-verbosity 1`（仅记录错误级输出）；每次启动前若单个日志文件超过 16 MiB 会自动截断。
 - 在 Windows x64 上，通用安装包默认内置 CPU 运行时以保证兼容性；若下载目录中同时存在完整的 CUDA 12.4 主包与 `cudart` 依赖包，则优先解压并使用 CUDA 运行时，其次为 CPU，最后为 Vulkan。解压目录通过记录文件名、大小与 SHA256 的 marker 文件判断是否需要更新。
 - 启用 EmbeddingGemma 2 时，共用运行时要求至少 b11457。选择归档前先按构建号过滤不兼容版本，避免本机旧 CUDA 缓存覆盖包内新版 CPU / CUDA 运行时；各后端仍按上述顺序选择。目录内按数字构建号选择最新归档；没有兼容版本时返回明确的运行时更新命令。
@@ -126,6 +127,8 @@ Rerank 与 Embedding 不能共用同一端口。当两个服务同时启用时�
 5. 轮询 `/health` 直至就绪，更新运行状态快照。
 
 ### EmbeddingGemma 2 多模态支持与 Fastpath 回退
+
+- **Qwen3-VL-Reranker-2B**：默认主模型 `Qwen3-VL-Reranker-2B.Q8_0.gguf` 自动加载同目录的 `Qwen3-VL-Reranker-2B.mmproj-f16.gguf`。该转换包含 rank pooling、yes/no 标签与 `[2048, 2]` 分类头，不能用普通生成模型替代。要求经过验证的 llama.cpp b12110 及以上；启用时与 Embedding 要求取最大构建号。CPU 模式同样禁用视觉编码器 GPU offload，缺少投影文件会在启动前报错。模型列表过滤 `mmproj-` 前缀和 `.mmproj-` 文件。
 
 - **EmbeddingGemma 2**：默认主模型 `embeddinggemma-2-Q8_0.gguf` 需要与多模态编码器 `mmproj-embeddinggemma-2-Q8_0.gguf` 放在同一目录（要求 `llama.cpp` b11457 及以上）。启动时会自动附加 `--mmproj` 参数；当 `gpu_layers` 为 `0` 时同步附加 `--no-mmproj-offload`。模型扫描列表会自动过滤 `mmproj-` 前缀文件，避免误选。
 - **Fastpath Sidecar**：采用单 ORT CUDA session，按当前微批最长文本动态 padding（单批上限 64 条，并发聚合窗口 750 微秒）。Windows 通过 `PATH`、Linux 通过 `LD_LIBRARY_PATH` 加载私有运行时目录。若 sidecar 启动失败、健康检查超时或运行期异常退出，进程管理器会在同一端口回退至 `llama-server`。
@@ -163,6 +166,8 @@ Rerank 与 Embedding 不能共用同一端口。当两个服务同时启用时�
 | `custom_json_http` | `/embeddings` | 是 |
 
 在默认的 `openai_embeddings` 协议下，EmbeddingGemma 2 的文本和图片嵌入共享 768 维向量空间，支持通过 `input: [{"content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}]}]` 传入图片或图文混合内容。
+
+Qwen3-VL 重排的 `query` 和各 `documents` 元素支持字符串或 `{ "text": "说明", "image": "data:image/png;base64,..." }`，也可只含图片。代理保留图片字段和文字数组，响应仅保留文档文字、索引和评分，避免回传 base64。非原生协议代理请求体上限为 32 MiB；这属于本地扩展，客户端需支持构造对应字段。原生协议由 llama.cpp 自行处理请求大小及响应。
 
 ## 数据目录汇总
 

@@ -2,6 +2,27 @@
 
 本文档记录在开发机上针对不同推理后端的实测数据与技术选型结论。
 
+## Qwen3-VL-Reranker-2B 图文重排序（2026-11-06）
+
+环境：Windows、i9-13900H、RTX 4070 Laptop 8 GiB（驱动 616.56）、llama.cpp b12110 CUDA 12.4。模型使用 `bealore/Qwen3-VL-Reranker-2B-GGUF` revision `5dc74c6bf8b65a8b47b1b0e1d6c0cbdba16c7f31` 的 Q8_0 主模型和 F16 投影。GGUF 实际元数据包含 `qwen3vl`、rank pooling、`yes/no` 标签和 `[2048, 2]` 分类权重。
+
+重排参数：全 GPU、1 槽、上下文 8192、逻辑/物理批 2048、`--image-max-tokens 1280 --cache-ram 0`。每次一个查询与一个候选，首轮后连续 5 轮取 P50，客户端预先完成 Base64/JSON 编码，计时包含 HTTP 发送与读取响应、图像解码和推理，不包含模型加载。
+
+| 场景 | 800 汉字候选 P50 | 2560×1440 图片候选 P50 | 文字范围 | 图片范围 |
+| --- | ---: | ---: | ---: | ---: |
+| 仅加载重排 | 62.5 ms | 1051 ms | 61.2–66.5 ms | 1023–1092 ms |
+| 同时加载 EmbeddingGemma 2 | 72.6 ms | 1014 ms | 61.8–76.2 ms | 985–1037 ms |
+| Vekai 0.1.13 原生接口，双模型常驻 | 55.3 ms | 863 ms | 54.6–57.7 ms | 831–907 ms |
+| Vekai 0.1.13 Jina 代理，双模型常驻 | 73.4 ms | 926 ms | 64.9–89.2 ms | 902–939 ms |
+
+Vekai 原生组重排批大小为 2048；Jina 组重排批大小未显式设置（llama.cpp 默认），两组均为 1 槽、同样的图片和查询。热状态及批大小不同，不能将两行差值全部归因于代理开销。实际应用两组均通过上述图文测试、超过 2 MiB 的三图片请求和响应不回传图片检查；Embedding 的文字和图片均返回有限数值的 768 维向量。
+
+800 汉字含标点共 874 字符，查询为“本地知识检索系统”，合计 593 tokens。图片为 [Unsplash 摄影样本](https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=2560&h=1440&fit=crop&q=85)，934444 字节，查询为 `A landscape photograph`，合计 1300 tokens。图片按 1280 视觉 token 预算缩放，结果不能代表任意图片或 OCR 精度。双服务测试中 Embedding 使用 8 槽、批大小 2048；两者均常驻，但请求顺序执行，未模拟两个服务同时满载。GPU 总占用约 6072 MiB，含桌面应用。
+
+真实图文排序使用无说明文字的 [猫](https://raw.githubusercontent.com/scikit-image/scikit-image/v0.19.3/skimage/data/chelsea.png)、[狗](https://raw.githubusercontent.com/pytorch/hub/master/images/dog.jpg)、[宇航员](https://raw.githubusercontent.com/scikit-image/scikit-image/v0.19.3/skimage/data/astronaut.png) 图片。英文猫查询评分为猫 `0.5914`、狗 `0.4050`、宇航员 `0.2980`；中文狗查询和中文宇航员查询均命中相应图片。反转候选顺序仍命中猫。图片查询图片、图片查询文字、同一中性字幕配不同图片均正确，证明图片参与评分。这是小样本冒烟，未构成公开检索质量基准。
+
+双服务下将重排提高到 8 槽并给每槽 8192 上下文，总 GPU 占用约 7798 MiB，三图片请求首轮耗时约 39.8 秒，出现明显显存压力。因此未显式设置时默认使用 1 个重排槽位，8GB GPU 的已有用户也应将该覆盖值调为 1。不同 GPU 和并发量需要重新测量。
+
 ## EmbeddingGemma 2 图文嵌入（2026-11-06）
 
 测试环境为 Windows、Intel Core i9-13900H（14 核 / 20 线程）、RTX 4070 Laptop GPU（8 GiB，驱动 616.56）、llama.cpp b12110。主模型和多模态编码器均为 `ggml-org/embeddinggemma-2-GGUF` Q8_0，输出 768 维向量。CUDA 组将主模型及编码器都加载至 GPU，CPU 组关闭两者的 GPU offload。

@@ -98,10 +98,18 @@ pwsh -File scripts/download-fastpath.ps1
 - **日常回归构建**：推送到 `master` 分支时自动运行六平台矩阵构建（Windows x64/ARM64、macOS x64/ARM64、Ubuntu x64/ARM64），产物上传至 Actions Artifacts。
 - **正式版本发布**：推送 `vMAJOR.MINOR.PATCH` 标签（或手动触发工作流并指定 tag）时，先校验 `package.json`、`src-tauri/Cargo.toml` 和 `src-tauri/tauri.conf.json` 版本号一致，随后构建并将各平台安装包发布到 GitHub Release。
 
+macOS ARM64 使用 `macos-15` runner，Intel 使用 `macos-15-intel`。GitHub 已于 2026-11-02 下线 macOS 14 runner，不能再使用 `macos-14`（见[官方公告](https://github.blog/changelog/2026-10-01-github-actions-macos-14-runner-image-retirement/)）。
+
 ```powershell
 git tag v0.1.11
 git push origin master
 git push origin v0.1.11
+```
+
+若版本标签创建后需要修复工作流，先将工作流修复提交推送到 `master`，再从 `master` 手动调度该版本。工作流定义取自 `master`，应用源码仍检出指定标签，避免移动已发布的版本标签。直接重新运行旧作业会继续使用旧工作流定义。
+
+```powershell
+gh workflow run release.yml --ref master -f tag=v0.1.11
 ```
 
 Linux `.deb` 安装包还会附带 `systemd` 服务说明与示例单元文件（位于 `/usr/share/doc/vekai/`）。

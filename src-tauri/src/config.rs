@@ -229,6 +229,8 @@ fn validate_protocol(service: ServiceKind, protocol: &str) -> Result<(), ConfigE
 pub enum ConfigError {
     #[error("missing EmbeddingGemma 2 multimodal projector: {path}. Download the matching mmproj GGUF alongside the model with scripts/download-assets.ps1")]
     MissingMultimodalProjector { path: String },
+    #[error("EmbeddingGemma 2 physical batch size ({batch_size}) must be divisible by parallel slots ({parallel_slots}) to avoid a llama.cpp mean-pooling crash. Use 8 parallel slots with batch_size=2048 and ubatch_size=2048, or align both batch sizes with the slot count")]
+    IncompatibleEmbeddingBatch { batch_size: u16, parallel_slots: u16 },
     #[error("failed to parse config JSON: {0}")]
     Json(#[from] serde_json::Error),
     #[error("host cannot be empty")]

@@ -30,7 +30,7 @@ npm run tauri:build
 
 - 运行 `cargo test --manifest-path src-tauri/Cargo.toml`。
 - **配置变更**：覆盖默认值、字段范围校验及异常输入。
-- **EmbeddingGemma 2**：验证配套 `mmproj` 自动加载和缺失错误、物理批默认跟随逻辑批、显式性能配置优先级，以及纯 CPU 模式下编码器不进行 GPU offload；实际请求至少覆盖长文本和图片。
+- **EmbeddingGemma 2**：验证配套 `mmproj` 自动加载和缺失错误、物理批默认跟随逻辑批、批大小与并发槽位的整除检查、显式性能配置优先级，以及纯 CPU 模式下编码器不进行 GPU offload。运行时选择须覆盖旧本机缓存与新版包内归档共存，以及缺少兼容运行时的提示；实际请求至少覆盖长文本和图片。
 - **协议变更**：覆盖 `supported_protocols` 白名单、`protocol_public_path` 公开路径映射以及请求/响应 JSON 转换。
 - **进程管理**：覆盖正常启停、健康检查超时、异常退出自动重启以及 Fastpath 到 `llama.cpp` 的自动回退。
 

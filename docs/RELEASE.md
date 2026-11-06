@@ -21,7 +21,7 @@ Windows 默认构建产物位于：
 
 ```text
 src-tauri\target\release\vekai.exe
-src-tauri\target\release\bundle\nsis\Vekai_0.1.11_x64-setup.exe
+src-tauri\target\release\bundle\nsis\Vekai_0.1.12_x64-setup.exe
 ```
 
 ### 构建 Windows 便携包（Portable ZIP）
@@ -49,6 +49,8 @@ pwsh -File scripts\build-portable-windows.ps1 -WindowsBackend cuda
 ```
 
 因此，将新版或特定后端的运行时放到 `%LOCALAPPDATA%\Vekai\downloads` 或程序同级 `downloads\` 目录下即可直接覆盖内置运行时。
+
+启用 EmbeddingGemma 2 时会跳过低于 b11457 的归档。旧 CUDA 缓存不满足模型要求时，应用会继续寻找其他目录中的兼容 CUDA，随后尝试兼容 CPU / Vulkan；没有兼容版本时提示更新运行时。Windows CUDA 用户可运行 `pwsh -File scripts/download-assets.ps1 -SkipModels -WindowsBackend cuda` 更新实际优先使用的本机下载目录。
 
 各平台对应的运行时归档：
 
@@ -114,15 +116,15 @@ pwsh -File scripts/download-fastpath.ps1
 GitHub 已于 2026-11-02 下线 macOS 14 runner，不能再使用 `macos-14`（见[官方公告](https://github.blog/changelog/2026-10-01-github-actions-macos-14-runner-image-retirement/)）。
 
 ```powershell
-git tag v0.1.11
+git tag v0.1.12
 git push origin master
-git push origin v0.1.11
+git push origin v0.1.12
 ```
 
 若版本标签创建后需要修复工作流，先将工作流修复提交推送到 `master`，再从 `master` 手动调度该版本。工作流定义取自 `master`，应用源码仍检出指定标签，避免移动已发布的版本标签。直接重新运行旧作业会继续使用旧工作流定义。
 
 ```powershell
-gh workflow run release.yml --ref master -f tag=v0.1.11
+gh workflow run release.yml --ref master -f tag=v0.1.12
 ```
 
 Linux `.deb` 安装包还会附带 `systemd` 服务说明与示例单元文件（位于 `/usr/share/doc/vekai/`）。

@@ -6,6 +6,15 @@ use std::path::{Path, PathBuf};
 use crate::service::ServiceKind;
 
 const DEFAULT_EMBEDDING_MODEL_NAME: &str = "embeddinggemma-2-Q8_0.gguf";
+pub const EMBEDDINGGEMMA_MIN_LLAMA_BUILD: u64 = 11457;
+
+pub fn embeddinggemma_projector_path(model_path: &Path) -> Option<PathBuf> {
+    model_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| name.to_lowercase().starts_with("embeddinggemma-2-"))
+        .map(|name| model_path.with_file_name(format!("mmproj-{name}")))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelInfo {

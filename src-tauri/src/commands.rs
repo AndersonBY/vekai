@@ -2,11 +2,12 @@ use crate::config::AppConfig;
 use crate::fastpath::discover_embedding_fastpath;
 use crate::logging::{append_log, log_paths, LogPaths};
 use crate::models::{
-    choose_default_model_for_service, discover_model_catalog, discover_models, ModelCatalog,
+    choose_default_model_for_service, discover_model_catalog, discover_models,
+    embeddinggemma_projector_path, ModelCatalog, EMBEDDINGGEMMA_MIN_LLAMA_BUILD,
 };
 use crate::process::ProcessManager;
 use crate::protocol_proxy::protocol_public_path;
-use crate::runtime::ensure_runtime_from_downloads;
+use crate::runtime::ensure_runtime_from_downloads_with_min_build;
 use crate::service::ServiceKind;
 use crate::state::{AppSnapshot, AppStateInner, ServiceStatus, SharedAppState};
 use anyhow::{anyhow, Context};
@@ -358,7 +359,11 @@ pub async fn start_servers_inner(
     };
     config.validate()?;
 
-    let runtime = ensure_runtime_from_downloads(&paths.runtime_root, &paths.download_dirs)?;
+    let runtime = ensure_runtime_from_downloads_with_min_build(
+        &paths.runtime_root,
+        &paths.download_dirs,
+        required_runtime_build(&paths.model_base_dir, &config),
+    )?;
     for service in ServiceKind::START_ORDER {
         if !config.service_enabled(service) {
             continue;
@@ -513,6 +518,19 @@ pub async fn test_embedding_inner(state: &SharedAppState) -> anyhow::Result<serd
 async fn snapshot(state: &SharedAppState) -> AppSnapshot {
     let state = state.lock().await;
     state.snapshot_v2()
+}
+
+fn required_runtime_build(model_base_dir: &Path, config: &AppConfig) -> u64 {
+    if config.embedding.enabled {
+        if let Ok(model_path) =
+            selected_service_model_path(model_base_dir, config, ServiceKind::Embedding)
+        {
+            if embeddinggemma_projector_path(&model_path).is_some() {
+                return EMBEDDINGGEMMA_MIN_LLAMA_BUILD;
+            }
+        }
+    }
+    0
 }
 
 fn selected_service_model_path(
@@ -1323,6 +1341,23 @@ mod tests {
 
         assert!(error.to_string().contains("No GGUF model found"));
         assert!(error.to_string().contains("models"));
+    }
+
+    #[test]
+    fn runtime_requirement_follows_enabled_embedding_model_selection() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("models")).unwrap();
+        fs::write(dir.path().join("models/embeddinggemma-2-Q8_0.gguf"), b"gemma").unwrap();
+        fs::write(dir.path().join("models/Qwen3-Embedding-0.6B-Q8_0.gguf"), b"qwen").unwrap();
+        let mut config = AppConfig::default();
+        assert_eq!(required_runtime_build(dir.path(), &config), 11457);
+
+        config.embedding.model_path = "models/Qwen3-Embedding-0.6B-Q8_0.gguf".to_string();
+        assert_eq!(required_runtime_build(dir.path(), &config), 0);
+        config.embedding.model_path = "models/embeddinggemma-2-Q8_0.gguf".to_string();
+        assert_eq!(required_runtime_build(dir.path(), &config), 11457);
+        config.embedding.enabled = false;
+        assert_eq!(required_runtime_build(dir.path(), &config), 0);
     }
 
     #[test]

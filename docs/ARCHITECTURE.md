@@ -95,10 +95,12 @@ Public Embedding/Rerank endpoints   Rust app state and config
 
 - `threads`、`parallel_slots`、`batch_size`、`ubatch_size`、`http_threads` 分别对应 `llama-server` 的 `--threads`、`--parallel`、`--batch-size`、`--ubatch-size` 和 `--threads-http`。值为 `0` 时不传该参数，交由 `llama.cpp` 自动决定；单服务下的非零配置会覆盖全局同名配置。
 - EmbeddingGemma 2 采用非因果注意力，单条输入必须完整放进一个物理批。未显式设置 `ubatch_size` 时，该模型使用有效的 `batch_size`（未设置时为 `2048`），避免 llama.cpp 默认物理批 `512` 导致普通长文本报错。显式设置的服务级或全局物理批仍优先生效；更长输入需要同时提高逻辑批和物理批大小。
+- EmbeddingGemma 2 显式设置并发槽位时，实际物理批大小（逻辑批与物理批的较小值）必须能被槽位数整除，否则 llama.cpp 的 mean pooling 初始化可能触发断言。Vekai 启动前拒绝这种参数组合并给出提示；例如并发 `8`、逻辑批 `2048`、物理批 `2048` 可用，并发 `12` 配合上述批大小不可用。
 - `gpu_layers` 设为 `all` 时会同时传入 `--fit off`，跳过自动显存拟合，强制将全部层加载至 GPU。
 - 由于 Embedding 和 Rerank 请求不需要保留生成式 KV 缓存，启动参数固定附加 `--cache-ram 0` 以节省内存开销。
 - 子进程日志固定附加 `--log-verbosity 1`（仅记录错误级输出）；每次启动前若单个日志文件超过 16 MiB 会自动截断。
 - 在 Windows x64 上，通用安装包默认内置 CPU 运行时以保证兼容性；若下载目录中同时存在完整的 CUDA 12.4 主包与 `cudart` 依赖包，则优先解压并使用 CUDA 运行时，其次为 CPU，最后为 Vulkan。解压目录通过记录文件名、大小与 SHA256 的 marker 文件判断是否需要更新。
+- 启用 EmbeddingGemma 2 时，共用运行时要求至少 b11457。选择归档前先按构建号过滤不兼容版本，避免本机旧 CUDA 缓存覆盖包内新版 CPU / CUDA 运行时；各后端仍按上述顺序选择。目录内按数字构建号选择最新归档；没有兼容版本时返回明确的运行时更新命令。
 
 ## 运行模式与启动流程
 

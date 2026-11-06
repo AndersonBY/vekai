@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use crate::config::{AppConfig, ConfigError};
+use crate::models::embeddinggemma_projector_path;
 use crate::service::ServiceKind;
 
 pub fn build_llama_server_args(
@@ -34,11 +35,7 @@ pub fn build_service_llama_server_args_for_endpoint(
     config.validate()?;
     let service_config = config.service_config(service);
     let embeddinggemma_projector = if service == ServiceKind::Embedding {
-        model_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .filter(|name| name.to_lowercase().starts_with("embeddinggemma-2-"))
-            .map(|name| model_path.with_file_name(format!("mmproj-{name}")))
+        embeddinggemma_projector_path(model_path)
     } else {
         None
     };
@@ -130,6 +127,15 @@ pub fn build_service_llama_server_args_for_endpoint(
     } else {
         0
     };
+    if embeddinggemma_projector.is_some() && parallel_slots > 0 {
+        let effective_batch_size = ubatch_size.min(if batch_size > 0 { batch_size } else { 2048 });
+        if effective_batch_size % parallel_slots != 0 {
+            return Err(ConfigError::IncompatibleEmbeddingBatch {
+                batch_size: effective_batch_size,
+                parallel_slots,
+            });
+        }
+    }
     if ubatch_size > 0 {
         args.push("--ubatch-size".to_string());
         args.push(ubatch_size.to_string());
@@ -434,6 +440,42 @@ mod tests {
         assert!(
             matches!(error, ConfigError::MissingMultimodalProjector { path }
             if path.ends_with("mmproj-embeddinggemma-2-Q8_0.gguf"))
+        );
+    }
+
+    #[test]
+    fn embeddinggemma_rejects_non_divisible_batch_and_slot_combination() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_path = dir.path().join("embeddinggemma-2-Q8_0.gguf");
+        std::fs::write(
+            dir.path().join("mmproj-embeddinggemma-2-Q8_0.gguf"),
+            b"projector",
+        )
+        .unwrap();
+        let mut config = AppConfig::default();
+        config.embedding.parallel_slots = 12;
+        let error = build_service_llama_server_args(ServiceKind::Embedding, &config, &model_path)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ConfigError::IncompatibleEmbeddingBatch {
+                batch_size: 2048,
+                parallel_slots: 12
+            }
+        ));
+
+        config.embedding.parallel_slots = 8;
+        assert!(
+            build_service_llama_server_args(ServiceKind::Embedding, &config, &model_path).is_ok()
+        );
+        config.embedding.parallel_slots = 12;
+        config.embedding.ubatch_size = 2112;
+        assert!(
+            build_service_llama_server_args(ServiceKind::Embedding, &config, &model_path).is_err()
+        );
+        config.embedding.batch_size = 2112;
+        assert!(
+            build_service_llama_server_args(ServiceKind::Embedding, &config, &model_path).is_ok()
         );
     }
 }

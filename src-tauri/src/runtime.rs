@@ -222,38 +222,28 @@ pub fn ensure_runtime_from_downloads(
     runtime_root: &Path,
     download_dirs: &[PathBuf],
 ) -> anyhow::Result<RuntimeLayout> {
+    ensure_runtime_from_downloads_with_min_build(runtime_root, download_dirs, 0)
+}
+
+pub fn ensure_runtime_from_downloads_with_min_build(
+    runtime_root: &Path,
+    download_dirs: &[PathBuf],
+    minimum_build: u64,
+) -> anyhow::Result<RuntimeLayout> {
     #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    if find_runtime_archives(download_dirs, RuntimePlatform::WindowsCudaX64).is_ok() {
-        return ensure_runtime_from_downloads_for_platform(
-            runtime_root,
-            download_dirs,
-            RuntimePlatform::WindowsCudaX64,
-        );
+    for platform in [
+        RuntimePlatform::WindowsCudaX64,
+        RuntimePlatform::WindowsCpuX64,
+        RuntimePlatform::WindowsVulkanX64,
+    ] {
+        if let Ok(archives) = find_runtime_archives(download_dirs, platform, minimum_build) {
+            return install_runtime_archives(runtime_root, platform, archives);
+        }
     }
 
-    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    if find_runtime_archives(download_dirs, RuntimePlatform::WindowsCpuX64).is_ok() {
-        return ensure_runtime_from_downloads_for_platform(
-            runtime_root,
-            download_dirs,
-            RuntimePlatform::WindowsCpuX64,
-        );
-    }
-
-    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    if find_runtime_archives(download_dirs, RuntimePlatform::WindowsVulkanX64).is_ok() {
-        return ensure_runtime_from_downloads_for_platform(
-            runtime_root,
-            download_dirs,
-            RuntimePlatform::WindowsVulkanX64,
-        );
-    }
-
-    ensure_runtime_from_downloads_for_platform(
-        runtime_root,
-        download_dirs,
-        RuntimePlatform::current(),
-    )
+    let platform = RuntimePlatform::current();
+    let archives = find_runtime_archives(download_dirs, platform, minimum_build)?;
+    install_runtime_archives(runtime_root, platform, archives)
 }
 
 pub fn ensure_runtime_from_downloads_for_platform(
@@ -261,10 +251,18 @@ pub fn ensure_runtime_from_downloads_for_platform(
     download_dirs: &[PathBuf],
     platform: RuntimePlatform,
 ) -> anyhow::Result<RuntimeLayout> {
+    let archives = find_runtime_archives(download_dirs, platform, 0)?;
+    install_runtime_archives(runtime_root, platform, archives)
+}
+
+fn install_runtime_archives(
+    runtime_root: &Path,
+    platform: RuntimePlatform,
+    runtime_archives: Vec<PathBuf>,
+) -> anyhow::Result<RuntimeLayout> {
     fs::create_dir_all(runtime_root).context("failed to create runtime root")?;
 
     let layout = runtime_layout_for_platform(runtime_root, platform);
-    let runtime_archives = find_runtime_archives(download_dirs, platform)?;
     let archive_names = runtime_archives
         .iter()
         .map(|archive| {
@@ -355,9 +353,21 @@ pub fn ensure_runtime_from_downloads_for_platform(
     Ok(layout)
 }
 
+fn runtime_build_number(path: &Path) -> Option<u64> {
+    path.file_name()?
+        .to_str()?
+        .to_ascii_lowercase()
+        .strip_prefix("llama-b")?
+        .split("-bin-")
+        .next()?
+        .parse()
+        .ok()
+}
+
 fn find_runtime_archives(
     download_dirs: &[PathBuf],
     platform: RuntimePlatform,
+    minimum_build: u64,
 ) -> anyhow::Result<Vec<PathBuf>> {
     for dir in download_dirs {
         if !dir.is_dir() {
@@ -372,9 +382,15 @@ fn find_runtime_archives(
                 path.file_name()
                     .and_then(|name| name.to_str())
                     .is_some_and(|name| platform.matches_asset_name(name))
+                    && (minimum_build == 0
+                        || runtime_build_number(path).is_some_and(|build| build >= minimum_build))
             })
             .collect::<Vec<_>>();
-        candidates.sort();
+        candidates.sort_by(|left, right| {
+            runtime_build_number(left)
+                .cmp(&runtime_build_number(right))
+                .then_with(|| left.cmp(right))
+        });
         if let Some(candidate) = candidates.pop() {
             if let Some(companion_name) = platform.companion_archive_name() {
                 let companion = dir.join(companion_name);
@@ -392,6 +408,12 @@ fn find_runtime_archives(
         .map(|path| path.display().to_string())
         .collect::<Vec<_>>()
         .join(", ");
+    if minimum_build > 0 {
+        bail!(
+            "missing compatible llama.cpp runtime: this model requires b{minimum_build} or newer. Run pwsh -File scripts/download-assets.ps1 -SkipModels (Windows CUDA: add -WindowsBackend cuda). Searched: {searched}. Expected {}",
+            platform.archive_hint()
+        );
+    }
     bail!(
         "missing llama.cpp runtime archive for current platform. Run scripts\\download-assets.ps1 first. Searched: {searched}. Expected a file like {}",
         platform.archive_hint()
@@ -752,6 +774,67 @@ mod tests {
         };
         assert!(sized_marker.matches_metadata(zip_name, &[123]));
         assert!(!sized_marker.matches_metadata(zip_name, &[456]));
+    }
+
+    #[test]
+    fn runtime_selection_orders_build_numbers_numerically() {
+        let dir = tempfile::tempdir().unwrap();
+        for build in [9999, 10046] {
+            fs::write(dir.path().join(format!("llama-b{build}-bin-win-cpu-x64.zip")), b"archive").unwrap();
+        }
+        let archives = find_runtime_archives(
+            &[dir.path().to_path_buf()], RuntimePlatform::WindowsCpuX64, 0,
+        ).unwrap();
+        assert_eq!(runtime_build_number(&archives[0]), Some(10046));
+    }
+
+    #[test]
+    fn runtime_requirement_rejects_old_archives_with_update_instructions() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("llama-b10046-bin-win-cpu-x64.zip"), b"old").unwrap();
+        let error = find_runtime_archives(
+            &[dir.path().to_path_buf()], RuntimePlatform::WindowsCpuX64, 11457,
+        ).unwrap_err();
+        assert!(error.to_string().contains("requires b11457 or newer"));
+        assert!(error.to_string().contains("-WindowsBackend cuda"));
+    }
+
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    #[test]
+    fn compatible_bundled_cuda_is_used_instead_of_stale_local_cuda() {
+        let dir = tempfile::tempdir().unwrap();
+        let local = dir.path().join("local-downloads");
+        let bundled = dir.path().join("bundled-downloads");
+        for (path, build) in [(&local, 10046), (&bundled, 12110)] {
+            fs::create_dir(path).unwrap();
+            write_test_runtime_zip(&path.join(format!("llama-b{build}-bin-win-cuda-12.4-x64.zip")));
+            write_test_cuda_companion_zip(&path.join("cudart-llama-bin-win-cuda-12.4-x64.zip"));
+        }
+        let layout = ensure_runtime_from_downloads_with_min_build(
+            &dir.path().join("runtimes"), &[local, bundled], 11457,
+        ).unwrap();
+        assert!(layout.runtime_dir.ends_with(WINDOWS_CUDA_RUNTIME_DIR_NAME));
+        let marker = read_marker(&layout.marker_path).unwrap();
+        assert!(marker.archive_name.contains("llama-b12110-"));
+    }
+
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    #[test]
+    fn compatible_cpu_is_used_when_only_cuda_runtime_is_too_old() {
+        let dir = tempfile::tempdir().unwrap();
+        let local = dir.path().join("local-downloads");
+        let bundled = dir.path().join("bundled-downloads");
+        fs::create_dir(&local).unwrap();
+        fs::create_dir(&bundled).unwrap();
+        write_test_runtime_zip(&local.join("llama-b10046-bin-win-cuda-12.4-x64.zip"));
+        write_test_cuda_companion_zip(&local.join("cudart-llama-bin-win-cuda-12.4-x64.zip"));
+        write_test_runtime_zip(&bundled.join("llama-b12110-bin-win-cpu-x64.zip"));
+        let layout = ensure_runtime_from_downloads_with_min_build(
+            &dir.path().join("runtimes"), &[local, bundled], 11457,
+        ).unwrap();
+        assert!(layout.runtime_dir.ends_with(RUNTIME_DIR_NAME));
+        let marker = read_marker(&layout.marker_path).unwrap();
+        assert!(marker.archive_name.contains("llama-b12110-"));
     }
 
     #[test]

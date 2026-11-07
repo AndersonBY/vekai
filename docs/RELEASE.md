@@ -102,8 +102,9 @@ pwsh -File scripts/download-fastpath.ps1
 
 `.github/workflows/release.yml` 负责跨平台构建与发布：
 
-- **日常回归构建**：推送到 `master` 分支时自动运行六平台矩阵构建（Windows x64/ARM64、macOS x64/ARM64、Ubuntu x64/ARM64），产物上传至 Actions Artifacts。
+- **PR 回归构建**：提交或更新面向 `master` 的 PR 时自动运行六平台矩阵构建（Windows x64/ARM64、macOS x64/ARM64、Ubuntu x64/ARM64），产物上传至 Actions Artifacts。同一 PR 的新提交会取消其旧构建。
 - **正式版本发布**：推送 `vMAJOR.MINOR.PATCH` 标签（或手动触发工作流并指定 tag）时，先校验 `package.json`、`src-tauri/Cargo.toml` 和 `src-tauri/tauri.conf.json` 版本号一致，随后构建并将各平台安装包发布到 GitHub Release。
+- **直接推送 master**：不自动启动发布工作流。发布时可以将分支和版本标签一起原子推送，只会启动标签对应的一套构建。
 
 当前构建环境使用 GitHub 已提供的新版 runner，并固定系统 / 工具链标签：
 
@@ -125,7 +126,7 @@ git tag v0.1.14
 git push --atomic origin master v0.1.14
 ```
 
-同时推送分支和标签会触发两次工作流。正式发布时保留 `v0.1.14` 标签运行，取消同一提交的 `master` 回归运行，避免重复构建；不要取消标签运行。
+工作流仅监听版本标签推送、PR 和手动调度。分支推送不会再产生第二套发布构建；同一标签的自动发布与手动调度共用并发组，避免同时构建或上传同一版本。
 
 若版本标签创建后需要修复工作流，先将工作流修复提交推送到 `master`，再从 `master` 手动调度该版本。工作流定义取自 `master`，应用源码仍检出指定标签，避免移动已发布的版本标签。直接重新运行旧作业会继续使用旧工作流定义。
 

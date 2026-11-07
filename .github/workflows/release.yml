@@ -2,10 +2,11 @@ name: Release
 
 on:
   push:
-    branches:
-      - master
     tags:
       - "v*.*.*"
+  pull_request:
+    branches:
+      - master
   workflow_dispatch:
     inputs:
       tag:
@@ -17,8 +18,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref == 'refs/heads/master' }}
+  group: release-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   validate:

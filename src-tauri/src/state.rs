@@ -56,6 +56,7 @@ pub struct AppStateInner {
     pub config: AppConfig,
     pub recent_logs: VecDeque<String>,
     pub embedding_recent_logs: VecDeque<String>,
+    combined_recent_logs: VecDeque<String>,
     pub error: Option<String>,
     pub embedding_error: Option<String>,
 }
@@ -70,28 +71,44 @@ impl AppStateInner {
             config,
             recent_logs: VecDeque::new(),
             embedding_recent_logs: VecDeque::new(),
+            combined_recent_logs: VecDeque::new(),
             error: None,
             embedding_error: None,
         }
     }
 
     pub fn push_log(&mut self, line: impl Into<String>) {
+        let line = line.into();
+        self.push_combined_log(ServiceKind::Rerank, &line);
         if self.recent_logs.len() >= RECENT_LOG_CAPACITY {
             self.recent_logs.pop_front();
         }
-        self.recent_logs.push_back(line.into());
+        self.recent_logs.push_back(line);
     }
 
     pub fn push_service_log(&mut self, service: ServiceKind, line: impl Into<String>) {
         match service {
             ServiceKind::Rerank => self.push_log(line),
             ServiceKind::Embedding => {
+                let line = line.into();
+                self.push_combined_log(service, &line);
                 if self.embedding_recent_logs.len() >= RECENT_LOG_CAPACITY {
                     self.embedding_recent_logs.pop_front();
                 }
-                self.embedding_recent_logs.push_back(line.into());
+                self.embedding_recent_logs.push_back(line);
             }
         }
+    }
+
+    fn push_combined_log(&mut self, service: ServiceKind, line: &str) {
+        if self.combined_recent_logs.len() >= RECENT_LOG_CAPACITY {
+            self.combined_recent_logs.pop_front();
+        }
+        self.combined_recent_logs.push_back(format!(
+            "[{}] [{}] {line}",
+            chrono::Local::now().format("%H:%M:%S%.3f"),
+            service.slug()
+        ));
     }
 
     pub fn set_service_status(&mut self, service: ServiceKind, status: ServiceStatus) {
@@ -144,7 +161,7 @@ impl AppStateInner {
             config: self.config.clone(),
             rerank: self.service_snapshot(ServiceKind::Rerank),
             embedding: self.service_snapshot(ServiceKind::Embedding),
-            recent_logs: self.recent_logs.iter().cloned().collect(),
+            recent_logs: self.combined_recent_logs.iter().cloned().collect(),
             error: self.error.clone(),
         }
     }
@@ -231,5 +248,23 @@ mod tests {
             r#"C:\models\embedding.gguf"#
         );
         assert_eq!(snapshot.embedding.recent_logs, vec!["embedding log"]);
+        assert!(snapshot.recent_logs[0].ends_with("[rerank] rerank log"));
+        assert!(snapshot.recent_logs[1].ends_with("[embedding] embedding log"));
+    }
+
+    #[test]
+    fn combined_logs_keep_arrival_order_when_one_service_is_busy() {
+        let mut state = AppStateInner::new(AppConfig::default());
+        for index in 0..305 {
+            state.push_service_log(ServiceKind::Embedding, format!("embedding {index}"));
+        }
+        state.push_service_log(ServiceKind::Rerank, "new rerank request");
+        let logs = state.snapshot_v2().recent_logs;
+        assert_eq!(logs.len(), 300);
+        assert!(logs.first().unwrap().ends_with("embedding 6"));
+        assert!(logs
+            .last()
+            .unwrap()
+            .ends_with("[rerank] new rerank request"));
     }
 }

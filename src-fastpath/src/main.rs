@@ -1,4 +1,7 @@
 use anyhow::{Context, Result};
+use axum::extract::Request;
+use axum::middleware::{self, Next};
+use axum::response::Response;
 use axum::{
     extract::State,
     http::StatusCode,
@@ -169,6 +172,22 @@ async fn health() -> Json<Value> {
     Json(json!({"status": "ok", "backend": "ort_cuda"}))
 }
 
+async fn log_inference_request(request: Request, next: Next) -> Response {
+    if request.uri().path() != "/v1/embeddings" {
+        return next.run(request).await;
+    }
+    let method = request.method().clone();
+    let started = Instant::now();
+    eprintln!("推理请求开始 {method} /v1/embeddings");
+    let response = next.run(request).await;
+    eprintln!(
+        "推理请求结束 {method} /v1/embeddings HTTP {} 耗时={} ms",
+        response.status().as_u16(),
+        started.elapsed().as_millis()
+    );
+    response
+}
+
 async fn embeddings(
     State(state): State<AppState>,
     Json(request): Json<EmbeddingRequest>,
@@ -289,6 +308,7 @@ async fn run() -> Result<()> {
     let app = Router::new()
         .route("/health", get(health))
         .route("/v1/embeddings", post(embeddings))
+        .layer(middleware::from_fn(log_inference_request))
         .with_state(AppState { work_tx });
     axum::serve(listener, app).await?;
     Ok(())
@@ -297,6 +317,41 @@ async fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn request_logging_preserves_worker_error_response() {
+        let (work_tx, work_rx) = mpsc::sync_channel(1);
+        drop(work_rx);
+        let app = Router::new()
+            .route("/health", get(health))
+            .route("/v1/embeddings", post(embeddings))
+            .layer(middleware::from_fn(log_inference_request))
+            .with_state(AppState { work_tx });
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let (health_response, error_response) = tokio::task::spawn_blocking(move || {
+            use std::io::Read;
+            let send = |request: &str| {
+                let mut socket = std::net::TcpStream::connect(addr).unwrap();
+                socket.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+                socket.write_all(request.as_bytes()).unwrap();
+                let mut response = String::new();
+                socket.read_to_string(&mut response).unwrap();
+                response
+            };
+            let health = send("GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+            let body = r#"{"input":"private-test-content"}"#;
+            let error = send(&format!("POST /v1/embeddings HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len()));
+            (health, error)
+        }).await.unwrap();
+        server.abort();
+        assert!(health_response.starts_with("HTTP/1.1 200"));
+        assert!(error_response.starts_with("HTTP/1.1 503"));
+        assert!(error_response.contains("embedding queue is full"));
+    }
 
     #[test]
     fn reduced_dimensions_are_renormalized() {

@@ -555,6 +555,8 @@ export default function App() {
   const [closePromptOpen, setClosePromptOpen] = useState(false);
   const [busyAction, setBusyAction] = useState<BusyAction | null>("bootstrap");
   const busyActionRef = useRef<BusyAction | null>("bootstrap");
+  const logViewRef = useRef<HTMLPreElement | null>(null);
+  const followLogsRef = useRef(true);
   const t = TEXT[language];
 
   const fallbackSnapshot: AppSnapshot = {
@@ -565,10 +567,9 @@ export default function App() {
     error: null,
   };
   const currentSnapshot = snapshot ?? fallbackSnapshot;
-  const recentLogs = [
-    ...currentSnapshot.rerank.recent_logs.map((line) => `[${t.rerank}] ${line}`),
-    ...currentSnapshot.embedding.recent_logs.map((line) => `[${t.embedding}] ${line}`),
-  ];
+  const recentLogs = currentSnapshot.recent_logs.map((line) =>
+    line.replace("[rerank]", `[${t.rerank}]`).replace("[embedding]", `[${t.embedding}]`),
+  );
   const serverBusy = busyAction !== null || anyServiceTransitioning(snapshot);
   const saveRestartsServer =
     anyServiceRunning(snapshot) &&
@@ -592,6 +593,11 @@ export default function App() {
         : t.save;
   const recentLogText =
     recentLogs.length > 0 ? recentLogs.slice(-100).join("\n") : t.noLogs;
+  useEffect(() => {
+    if (followLogsRef.current && logViewRef.current) {
+      logViewRef.current.scrollTop = logViewRef.current.scrollHeight;
+    }
+  }, [recentLogText]);
   const hostWarning = isBindAllHost(config.host) ? t.messages.bindAll : null;
   const portWarning =
     config.rerank.enabled &&
@@ -637,28 +643,33 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!anyServiceTransitioning(snapshot)) return;
-
     let cancelled = false;
-    const timer = window.setInterval(() => {
-      void (async () => {
-        try {
-          const nextSnapshot = await invoke<AppSnapshot>("get_snapshot");
-          if (cancelled) return;
+    let pending = false;
+    async function refreshSnapshot() {
+      if (document.visibilityState !== "visible" || pending) return;
+      pending = true;
+      try {
+        const nextSnapshot = await invoke<AppSnapshot>("get_snapshot");
+        if (!cancelled) {
           setSnapshot((current) =>
-            mergeSnapshotWithCurrentConfig(nextSnapshot, current?.config ?? config),
+            mergeSnapshotWithCurrentConfig(nextSnapshot, current?.config ?? nextSnapshot.config),
           );
-        } catch (caught) {
-          if (!cancelled) setError(getErrorMessage(caught));
         }
-      })();
-    }, SNAPSHOT_POLL_INTERVAL_MS);
+      } catch (caught) {
+        if (!cancelled) setError(getErrorMessage(caught));
+      } finally {
+        pending = false;
+      }
+    }
+    const timer = window.setInterval(() => void refreshSnapshot(), SNAPSHOT_POLL_INTERVAL_MS);
+    document.addEventListener("visibilitychange", refreshSnapshot);
 
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshSnapshot);
     };
-  }, [snapshot?.rerank.status, snapshot?.embedding.status]);
+  }, []);
 
   useEffect(() => {
     function handleCloseRequested() {
@@ -1014,7 +1025,16 @@ export default function App() {
           <h2>{t.recentLogs}</h2>
           <span className="muted">{recentLogs.length} {t.lines}</span>
         </div>
-        <pre className="log-view">{recentLogText}</pre>
+        <pre
+          className="log-view"
+          ref={logViewRef}
+          tabIndex={0}
+          aria-label={t.recentLogs}
+          onScroll={(event) => {
+            const view = event.currentTarget;
+            followLogsRef.current = view.scrollHeight - view.scrollTop - view.clientHeight < 24;
+          }}
+        >{recentLogText}</pre>
       </section>
 
       {closePromptOpen ? (

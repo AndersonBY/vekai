@@ -1,7 +1,7 @@
 use crate::config::AppConfig;
 use crate::fastpath::FastPathLayout;
 use crate::llama_args::build_service_llama_server_args_for_endpoint;
-use crate::logging::{append_log, prepare_server_log, LogPaths};
+use crate::logging::{append_log, prepare_server_log, InferenceLogFormatter, LogPaths};
 use crate::protocol_proxy::{
     plan_protocol_launch, start_protocol_proxy, ProtocolProxyConfig, ProtocolProxyHandle,
 };
@@ -987,10 +987,12 @@ where
 {
     tokio::spawn(async move {
         let mut reader = BufReader::new(stream).lines();
+        let mut formatter = InferenceLogFormatter::default();
 
         loop {
             match reader.next_line().await {
                 Ok(Some(line)) => {
+                    let line = formatter.format(&line);
                     let _ = append_log(&log_path, &line);
                     let mut state = state.lock().await;
                     state.push_service_log(kind, line);
@@ -1421,6 +1423,37 @@ mod tests {
         let manager = ProcessManager::new();
 
         assert!(manager.child.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn running_service_stream_updates_snapshot_and_log_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("embedding-server.log");
+        let state = Arc::new(Mutex::new(AppStateInner::new(AppConfig::default())));
+        state.lock().await.embedding_status = ServiceStatus::Running;
+        let (mut writer, reader) = tokio::io::duplex(2048);
+        spawn_log_reader(ServiceKind::Embedding, reader, path.clone(), state.clone());
+        writer.write_all(b"0.18.846.379 I slot launch_slot_: id 0 | task 10 | processing task, is_child = 0\n0.18.986.671 I slot release: id 0 | task 10 | stop processing: n_tokens = 85, truncated = 0\nencoding error\n").await.unwrap();
+        writer.shutdown().await.unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let snapshot = state.lock().await.snapshot_v2();
+            if snapshot.recent_logs.len() == 3 {
+                assert_eq!(snapshot.embedding.status, ServiceStatus::Running);
+                assert!(snapshot.recent_logs[0].contains("[embedding] 推理开始 task=10"));
+                assert!(snapshot.recent_logs[1].contains("推理结束 task=10 tokens=85 耗时="));
+                assert!(snapshot.recent_logs[2].ends_with("encoding error"));
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "runtime output was not collected"
+            );
+            sleep(Duration::from_millis(10)).await;
+        }
+        let log = std::fs::read_to_string(path).unwrap();
+        assert!(log.contains("推理结束 task=10 tokens=85 耗时="));
+        assert!(log.contains("encoding error"));
     }
 
     #[tokio::test]

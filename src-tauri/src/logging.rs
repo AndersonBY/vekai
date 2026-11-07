@@ -1,12 +1,58 @@
 use anyhow::Context;
 use chrono::{Duration, Utc};
+use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use crate::service::ServiceKind;
 
 pub const MAX_SERVER_LOG_BYTES: u64 = 16 * 1024 * 1024;
+
+#[derive(Default)]
+pub struct InferenceLogFormatter {
+    active_tasks: HashMap<u64, Instant>,
+}
+
+impl InferenceLogFormatter {
+    pub fn format(&mut self, line: &str) -> String {
+        self.task_summary(line).unwrap_or_else(|| line.to_string())
+    }
+
+    fn task_summary(&mut self, line: &str) -> Option<String> {
+        if !line.contains(" I slot ") {
+            return None;
+        }
+        let task = line
+            .split_once("| task")?
+            .1
+            .split_whitespace()
+            .next()?
+            .parse::<u64>()
+            .ok()?;
+        if line.contains("processing task,") {
+            self.active_tasks.insert(task, Instant::now());
+            return Some(format!("推理开始 task={task}"));
+        }
+        if line.contains("stop processing:") {
+            let started = self.active_tasks.remove(&task)?;
+            let tokens = line
+                .split_once("n_tokens = ")?
+                .1
+                .split(',')
+                .next()?
+                .trim()
+                .parse::<u64>()
+                .ok()?;
+            return Some(format!(
+                "推理结束 task={task} tokens={tokens} 耗时={} ms",
+                started.elapsed().as_millis()
+            ));
+        }
+        None
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogPaths {
@@ -142,6 +188,28 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::Path;
+
+    #[test]
+    fn inference_summaries_track_interleaved_tasks_and_preserve_other_output() {
+        let mut formatter = InferenceLogFormatter::default();
+        for task in [10, 11] {
+            assert_eq!(formatter.format(&format!("0.18.846.379 I slot launch_slot_: id 0 | task {task} | processing task, is_child = 0")), format!("推理开始 task={task}"));
+        }
+        for task in [11, 10] {
+            let result = formatter.format(&format!("0.18.986.671 I slot release: id 0 | task {task} | stop processing: n_tokens = 85, truncated = 0"));
+            assert!(result.starts_with(&format!("推理结束 task={task} tokens=85 耗时=")));
+            assert!(result.ends_with(" ms"));
+        }
+        assert!(formatter.active_tasks.is_empty());
+        for line in [
+            "error: failed to encode image",
+            "fastpath engine ready",
+            "I slot release: id 0 | task 22 | stop processing: n_tokens = 5",
+            "I slot release: unknown format",
+        ] {
+            assert_eq!(formatter.format(line), line);
+        }
+    }
 
     #[test]
     fn log_paths_points_to_expected_files_under_logs_dir() {

@@ -21,7 +21,7 @@ Windows 默认构建产物位于：
 
 ```text
 src-tauri\target\release\vekai.exe
-src-tauri\target\release\bundle\nsis\Vekai_0.1.13_x64-setup.exe
+src-tauri\target\release\bundle\nsis\Vekai_0.1.14_x64-setup.exe
 ```
 
 ### 构建 Windows 便携包（Portable ZIP）
@@ -121,16 +121,16 @@ pwsh -File scripts/download-fastpath.ps1
 GitHub 已于 2026-11-02 下线 macOS 14 runner，不能再使用 `macos-14`（见[官方公告](https://github.blog/changelog/2026-10-01-github-actions-macos-14-runner-image-retirement/)）。
 
 ```powershell
-git tag v0.1.13
-git push --atomic origin master v0.1.13
+git tag v0.1.14
+git push --atomic origin master v0.1.14
 ```
 
-同时推送分支和标签会触发两次工作流。正式发布时保留 `v0.1.13` 标签运行，取消同一提交的 `master` 回归运行，避免重复构建；不要取消标签运行。
+同时推送分支和标签会触发两次工作流。正式发布时保留 `v0.1.14` 标签运行，取消同一提交的 `master` 回归运行，避免重复构建；不要取消标签运行。
 
 若版本标签创建后需要修复工作流，先将工作流修复提交推送到 `master`，再从 `master` 手动调度该版本。工作流定义取自 `master`，应用源码仍检出指定标签，避免移动已发布的版本标签。直接重新运行旧作业会继续使用旧工作流定义。
 
 ```powershell
-gh workflow run release.yml --ref master -f tag=v0.1.13
+gh workflow run release.yml --ref master -f tag=v0.1.14
 ```
 
 Linux `.deb` 安装包还会附带 `systemd` 服务说明与示例单元文件（位于 `/usr/share/doc/vekai/`）。

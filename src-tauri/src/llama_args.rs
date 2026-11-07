@@ -85,7 +85,7 @@ pub fn build_service_llama_server_args_for_endpoint(
         "--cache-ram".to_string(),
         "0".to_string(),
         "--log-verbosity".to_string(),
-        "1".to_string(),
+        "3".to_string(),
     ]);
 
     if !config.gpu_layers.is_empty() {
@@ -209,7 +209,7 @@ mod tests {
                 "--cache-ram",
                 "0",
                 "--log-verbosity",
-                "1",
+                "3",
                 "--n-gpu-layers",
                 "auto",
             ]
@@ -274,7 +274,7 @@ mod tests {
         assert!(args.windows(2).any(|window| window == ["--cache-ram", "0"]));
         assert!(args
             .windows(2)
-            .any(|window| window == ["--log-verbosity", "1"]));
+            .any(|window| window == ["--log-verbosity", "3"]));
     }
 
     #[test]
@@ -403,7 +403,7 @@ mod tests {
                 "--cache-ram",
                 "0",
                 "--log-verbosity",
-                "1",
+                "3",
                 "--n-gpu-layers",
                 "auto",
             ]
